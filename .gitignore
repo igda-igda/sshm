@@ -1,6 +1,9 @@
 # Agent OS directory
 .agent-os/
 
+# Project documentation (local only)
+CLAUDE.md
+
 # Binaries for programs and plugins
 *.exe
 *.exe~
