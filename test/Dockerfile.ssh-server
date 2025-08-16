@@ -1,0 +1,26 @@
+FROM alpine:latest
+
+# Install OpenSSH and required packages
+RUN apk add --no-cache openssh-server bash sudo
+
+# Create SSH directory
+RUN mkdir -p /var/run/sshd
+
+# Configure SSH
+RUN sed -i 's/#PermitRootLogin prohibit-password/PermitRootLogin no/' /etc/ssh/sshd_config
+RUN sed -i 's/#PasswordAuthentication yes/PasswordAuthentication yes/' /etc/ssh/sshd_config
+RUN sed -i 's/#PubkeyAuthentication yes/PubkeyAuthentication yes/' /etc/ssh/sshd_config
+
+# Generate host keys
+RUN ssh-keygen -A
+
+# Create entrypoint script
+COPY test/entrypoint.sh /entrypoint.sh
+RUN chmod +x /entrypoint.sh
+
+# Expose SSH port
+EXPOSE 22
+
+# Start SSH service
+ENTRYPOINT ["/entrypoint.sh"]
+CMD ["/usr/sbin/sshd", "-D", "-e"]
