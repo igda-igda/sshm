@@ -1,0 +1,36 @@
+version: '3.8'
+
+services:
+  ssh-test-server:
+    build:
+      context: .
+      dockerfile: test/Dockerfile.ssh-server
+    container_name: sshm-test-server
+    ports:
+      - "2222:22"
+    environment:
+      - SSH_USERS=testuser:testpass:1000:1000:/bin/bash
+    volumes:
+      - ./test/ssh-keys:/etc/ssh/keys:ro
+      - ./test/authorized_keys:/home/testuser/.ssh/authorized_keys:ro
+    networks:
+      - sshm-test
+
+  ssh-test-server-2:
+    build:
+      context: .
+      dockerfile: test/Dockerfile.ssh-server
+    container_name: sshm-test-server-2
+    ports:
+      - "2223:22"
+    environment:
+      - SSH_USERS=admin:adminpass:1001:1001:/bin/bash
+    volumes:
+      - ./test/ssh-keys:/etc/ssh/keys:ro
+      - ./test/authorized_keys:/home/admin/.ssh/authorized_keys:ro
+    networks:
+      - sshm-test
+
+networks:
+  sshm-test:
+    driver: bridge

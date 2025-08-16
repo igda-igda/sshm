@@ -16,9 +16,21 @@ var addCmd = &cobra.Command{
   Use:   "add <server-name>",
   Short: "Add a new server configuration",
   Long: `Add a new server configuration with interactive prompts for connection details.
+
+This command will prompt you for:
+  • Hostname/IP address of the server
+  • SSH port (default: 22)
+  • Username for authentication
+  • Authentication method (SSH key or password)
+  • SSH key path (if using key authentication)
+  • Passphrase protection status (for SSH keys)
+
+The server configuration will be stored securely in ~/.sshm/config.yaml
   
-Example:
-  sshm add production-api`,
+Examples:
+  sshm add production-api        # Add production API server
+  sshm add staging-db           # Add staging database server
+  sshm add jump-host            # Add bastion/jump host`,
   Args: cobra.ExactArgs(1),
   RunE: func(cmd *cobra.Command, args []string) error {
     return runAddCommand(args, cmd.OutOrStdout())
@@ -31,12 +43,12 @@ func runAddCommand(args []string, output io.Writer) error {
   // Load existing configuration
   cfg, err := config.Load()
   if err != nil {
-    return fmt.Errorf("failed to load configuration: %w", err)
+    return fmt.Errorf("❌ Failed to load configuration: %w", err)
   }
 
   // Check if server already exists
   if _, err := cfg.GetServer(serverName); err == nil {
-    return fmt.Errorf("server '%s' already exists", serverName)
+    return fmt.Errorf("❌ Server '%s' already exists. Use 'sshm remove %s' to remove it first", serverName, serverName)
   }
 
   // Interactive prompts for server configuration
@@ -51,7 +63,7 @@ func runAddCommand(args []string, output io.Writer) error {
   }
   hostname := strings.TrimSpace(scanner.Text())
   if hostname == "" {
-    return fmt.Errorf("hostname is required")
+    return fmt.Errorf("❌ Hostname is required")
   }
 
   // Port
@@ -65,7 +77,7 @@ func runAddCommand(args []string, output io.Writer) error {
   }
   port, err := strconv.Atoi(portStr)
   if err != nil || port <= 0 || port > 65535 {
-    return fmt.Errorf("invalid port: %s", portStr)
+    return fmt.Errorf("❌ Invalid port: %s. Port must be between 1 and 65535", portStr)
   }
 
   // Username
@@ -75,7 +87,7 @@ func runAddCommand(args []string, output io.Writer) error {
   }
   username := strings.TrimSpace(scanner.Text())
   if username == "" {
-    return fmt.Errorf("username is required")
+    return fmt.Errorf("❌ Username is required")
   }
 
   // Authentication type
@@ -85,7 +97,7 @@ func runAddCommand(args []string, output io.Writer) error {
   }
   authType := strings.TrimSpace(strings.ToLower(scanner.Text()))
   if authType != "key" && authType != "password" {
-    return fmt.Errorf("authentication type must be 'key' or 'password'")
+    return fmt.Errorf("❌ Authentication type must be 'key' or 'password', got: %s", authType)
   }
 
   // Create server configuration
@@ -105,7 +117,7 @@ func runAddCommand(args []string, output io.Writer) error {
     }
     keyPath := strings.TrimSpace(scanner.Text())
     if keyPath == "" {
-      return fmt.Errorf("key path is required for key authentication")
+      return fmt.Errorf("❌ SSH key path is required for key authentication")
     }
     server.KeyPath = keyPath
 
@@ -119,19 +131,20 @@ func runAddCommand(args []string, output io.Writer) error {
 
   // Validate the server configuration
   if err := server.Validate(); err != nil {
-    return fmt.Errorf("invalid server configuration: %w", err)
+    return fmt.Errorf("❌ Invalid server configuration: %w", err)
   }
 
   // Add server to configuration
   if err := cfg.AddServer(server); err != nil {
-    return fmt.Errorf("failed to add server: %w", err)
+    return fmt.Errorf("❌ Failed to add server: %w", err)
   }
 
   // Save configuration
   if err := cfg.Save(); err != nil {
-    return fmt.Errorf("failed to save configuration: %w", err)
+    return fmt.Errorf("❌ Failed to save configuration: %w", err)
   }
 
-  fmt.Fprintf(output, "\nServer '%s' added successfully!\n", serverName)
+  fmt.Fprintf(output, "\n✅ Server '%s' added successfully!\n", serverName)
+  fmt.Fprintf(output, "💡 Use 'sshm connect %s' to connect to this server\n", serverName)
   return nil
 }

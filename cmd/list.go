@@ -12,10 +12,18 @@ import (
 var listCmd = &cobra.Command{
   Use:   "list",
   Short: "List all configured servers",
-  Long: `List all configured servers with their connection details.
+  Long: `List all configured servers with their connection details in a formatted table.
+
+The table shows:
+  • Server name (for use with other commands)
+  • Hostname and port combination
+  • Username for authentication
+  • Authentication method (key or password)
+  • SSH key path (if using key authentication)
   
-Example:
-  sshm list`,
+Examples:
+  sshm list                     # List all servers
+  sshm list | grep production   # Filter production servers`,
   RunE: func(cmd *cobra.Command, args []string) error {
     return runListCommand(cmd.OutOrStdout())
   },
@@ -25,13 +33,13 @@ func runListCommand(output io.Writer) error {
   // Load configuration
   cfg, err := config.Load()
   if err != nil {
-    return fmt.Errorf("failed to load configuration: %w", err)
+    return fmt.Errorf("❌ Failed to load configuration: %w", err)
   }
 
   servers := cfg.GetServers()
   if len(servers) == 0 {
-    fmt.Fprintln(output, "No servers configured.")
-    fmt.Fprintln(output, "Use 'sshm add <server-name>' to add a server.")
+    fmt.Fprintln(output, "📋 No servers configured.")
+    fmt.Fprintln(output, "💡 Use 'sshm add <server-name>' to add a server.")
     return nil
   }
 
@@ -58,6 +66,7 @@ func runListCommand(output io.Writer) error {
 
   w.Flush()
   
-  fmt.Fprintf(output, "\nTotal: %d server(s)\n", len(servers))
+  fmt.Fprintf(output, "\n📊 Total: %d server(s)\n", len(servers))
+  fmt.Fprintln(output, "💡 Use 'sshm connect <server-name>' to connect to a server")
   return nil
 }

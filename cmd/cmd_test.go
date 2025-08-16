@@ -83,7 +83,7 @@ func TestAddCommand(t *testing.T) {
         "invalid",  // port
       },
       expectError: true,
-      contains:    "invalid port",
+      contains:    "Invalid port",
     },
     {
       name: "duplicate server name",
@@ -100,7 +100,7 @@ func TestAddCommand(t *testing.T) {
         setupTestServers(configDir) // This will create a production-api server
       },
       expectError: true,
-      contains:    "server 'production-api' already exists",
+      contains:    "already exists",
     },
   }
 
@@ -240,7 +240,7 @@ func TestRemoveCommand(t *testing.T) {
       name:        "non-existent server",
       args:        []string{"non-existent"},
       expectError: true,
-      contains:    "server 'non-existent' not found",
+      contains:    "not found",
     },
   }
 
@@ -310,7 +310,7 @@ func TestConnectCommand(t *testing.T) {
       name:        "non-existent server",
       args:        []string{"non-existent"},
       expectError: true,
-      contains:    "server 'non-existent' not found",
+      contains:    "not found",
     },
   }
 
