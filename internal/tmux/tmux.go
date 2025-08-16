@@ -40,7 +40,7 @@ func (m *Manager) CreateSession(sessionName string) error {
 // ListSessions returns a list of existing tmux session names
 func (m *Manager) ListSessions() ([]string, error) {
 	// If we have mock sessions for testing, use those
-	if len(m.existingSessions) > 0 {
+	if m.existingSessions != nil {
 		return m.existingSessions, nil
 	}
 
@@ -62,23 +62,35 @@ func (m *Manager) ListSessions() ([]string, error) {
 	return sessionNames, nil
 }
 
+// normalizeSessionName converts session names to match tmux's naming behavior
+// tmux converts dots and other special characters to underscores
+func normalizeSessionName(name string) string {
+	// Replace dots with underscores to match tmux behavior
+	normalized := strings.ReplaceAll(name, ".", "_")
+	// Add other character replacements as needed for tmux compatibility
+	return normalized
+}
+
 // generateUniqueSessionName creates a unique session name by appending a counter if needed
 func (m *Manager) generateUniqueSessionName(baseName string) string {
+	// Normalize the base name to match tmux behavior
+	normalizedBaseName := normalizeSessionName(baseName)
+	
 	sessions, err := m.ListSessions()
 	if err != nil {
-		// If we can't list sessions, just return the base name
-		return baseName
+		// If we can't list sessions, just return the normalized base name
+		return normalizedBaseName
 	}
 
-	// Check if base name is available
-	if !contains(sessions, baseName) {
-		return baseName
+	// Check if normalized base name is available
+	if !contains(sessions, normalizedBaseName) {
+		return normalizedBaseName
 	}
 
 	// Find the lowest available counter
 	counter := 1
 	for {
-		candidateName := fmt.Sprintf("%s-%d", baseName, counter)
+		candidateName := fmt.Sprintf("%s-%d", normalizedBaseName, counter)
 		if !contains(sessions, candidateName) {
 			return candidateName
 		}

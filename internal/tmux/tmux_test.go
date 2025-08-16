@@ -83,6 +83,44 @@ func TestCreateSession(t *testing.T) {
   }
 }
 
+func TestNormalizeSessionName(t *testing.T) {
+  tests := []struct {
+    name     string
+    input    string
+    expected string
+  }{
+    {
+      name:     "no special characters",
+      input:    "server1",
+      expected: "server1",
+    },
+    {
+      name:     "dots converted to underscores",
+      input:    "cloudcrafters.cloud",
+      expected: "cloudcrafters_cloud",
+    },
+    {
+      name:     "multiple dots",
+      input:    "api.staging.company.com",
+      expected: "api_staging_company_com",
+    },
+    {
+      name:     "mixed characters",
+      input:    "my.server-name",
+      expected: "my_server-name",
+    },
+  }
+
+  for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+      result := normalizeSessionName(tt.input)
+      if result != tt.expected {
+        t.Errorf("normalizeSessionName() = %v, want %v", result, tt.expected)
+      }
+    })
+  }
+}
+
 func TestGenerateUniqueSessionName(t *testing.T) {
   tests := []struct {
     name           string
@@ -113,6 +151,18 @@ func TestGenerateUniqueSessionName(t *testing.T) {
       baseName:         "server1",
       existingSessions: []string{"server1", "server1-2", "server1-5"},
       expected:         "server1-1",
+    },
+    {
+      name:             "normalize session name with dots",
+      baseName:         "cloudcrafters.cloud",
+      existingSessions: []string{},
+      expected:         "cloudcrafters_cloud",
+    },
+    {
+      name:             "normalize and handle conflicts",
+      baseName:         "cloudcrafters.cloud",
+      existingSessions: []string{"cloudcrafters_cloud"},
+      expected:         "cloudcrafters_cloud-1",
     },
   }
 
