@@ -12,7 +12,7 @@ func TestConfigLoad(t *testing.T) {
 	configPath := filepath.Join(tempDir, "config.yaml")
 
 	// Test loading non-existent config (should create default)
-	config, err := Load(configPath)
+	config, err := LoadFromPath(configPath)
 	if err != nil {
 		t.Fatalf("Expected no error loading non-existent config, got: %v", err)
 	}
@@ -44,7 +44,7 @@ func TestConfigSave(t *testing.T) {
 	}
 
 	// Save config
-	err := config.Save(configPath)
+	err := config.SaveToPath(configPath)
 	if err != nil {
 		t.Fatalf("Expected no error saving config, got: %v", err)
 	}

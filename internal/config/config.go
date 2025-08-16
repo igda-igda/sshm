@@ -22,11 +22,17 @@ type Server struct {
 
 // Config represents the main configuration structure
 type Config struct {
-	Servers []Server `yaml:"servers" json:"servers"`
+	Servers    []Server `yaml:"servers" json:"servers"`
+	configPath string   // internal field to track config file path
 }
 
 // DefaultConfigPath returns the default configuration file path
 func DefaultConfigPath() (string, error) {
+	// Check for test environment
+	if testConfigDir := os.Getenv("SSHM_CONFIG_DIR"); testConfigDir != "" {
+		return filepath.Join(testConfigDir, "config.yaml"), nil
+	}
+
 	homeDir, err := os.UserHomeDir()
 	if err != nil {
 		return "", fmt.Errorf("failed to get user home directory: %w", err)
@@ -36,9 +42,18 @@ func DefaultConfigPath() (string, error) {
 	return filepath.Join(configDir, "config.yaml"), nil
 }
 
-// Load loads configuration from the specified path
+// Load loads configuration from the default path
+func Load() (*Config, error) {
+	configPath, err := DefaultConfigPath()
+	if err != nil {
+		return nil, err
+	}
+	return LoadFromPath(configPath)
+}
+
+// LoadFromPath loads configuration from the specified path
 // If the file doesn't exist, it returns a default empty configuration
-func Load(configPath string) (*Config, error) {
+func LoadFromPath(configPath string) (*Config, error) {
 	// Create directory if it doesn't exist
 	configDir := filepath.Dir(configPath)
 	if err := os.MkdirAll(configDir, 0700); err != nil {
@@ -47,7 +62,7 @@ func Load(configPath string) (*Config, error) {
 
 	// If file doesn't exist, return empty config
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return &Config{Servers: []Server{}}, nil
+		return &Config{Servers: []Server{}, configPath: configPath}, nil
 	}
 
 	// Read file
@@ -62,11 +77,17 @@ func Load(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
 	}
 
+	config.configPath = configPath
 	return &config, nil
 }
 
-// Save saves the configuration to the specified path with proper permissions
-func (c *Config) Save(configPath string) error {
+// Save saves the configuration to the stored path with proper permissions
+func (c *Config) Save() error {
+	return c.SaveToPath(c.configPath)
+}
+
+// SaveToPath saves the configuration to the specified path with proper permissions
+func (c *Config) SaveToPath(configPath string) error {
 	// Create directory if it doesn't exist
 	configDir := filepath.Dir(configPath)
 	if err := os.MkdirAll(configDir, 0700); err != nil {
@@ -132,8 +153,8 @@ func (c *Config) GetServer(name string) (*Server, error) {
 	return nil, fmt.Errorf("server '%s' not found", name)
 }
 
-// ListServers returns all servers
-func (c *Config) ListServers() []Server {
+// GetServers returns all servers
+func (c *Config) GetServers() []Server {
 	return c.Servers
 }
 
