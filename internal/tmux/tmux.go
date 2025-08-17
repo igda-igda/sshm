@@ -2,6 +2,7 @@ package tmux
 
 import (
 	"fmt"
+	"os"
 	"os/exec"
 	"strings"
 )
@@ -111,7 +112,11 @@ func (m *Manager) SendKeys(sessionName, command string) error {
 // AttachSession attaches to a tmux session
 func (m *Manager) AttachSession(sessionName string) error {
 	cmd := execCommand("tmux", "attach-session", "-t", sessionName)
-	// For attach, we want to run the command and let it take over the terminal
+	// Set up the command to inherit stdin, stdout, stderr so it can take over the terminal
+	cmd.Stdin = os.Stdin
+	cmd.Stdout = os.Stdout
+	cmd.Stderr = os.Stderr
+	
 	err := cmd.Run()
 	if err != nil {
 		return fmt.Errorf("failed to attach to session '%s': %w", sessionName, err)
@@ -119,29 +124,39 @@ func (m *Manager) AttachSession(sessionName string) error {
 	return nil
 }
 
-// ConnectToServer creates a tmux session and connects to a server via SSH
-func (m *Manager) ConnectToServer(serverName, sshCommand string) (string, error) {
+// ConnectToServer creates a tmux session and connects to a server via SSH, or reattaches to existing session
+func (m *Manager) ConnectToServer(serverName, sshCommand string) (string, bool, error) {
 	// Check if tmux is available
 	if !m.IsAvailable() {
-		return "", fmt.Errorf("tmux is not available on this system")
+		return "", false, fmt.Errorf("tmux is not available on this system")
 	}
 
-	// Generate unique session name
+	// Normalize the session name to match tmux behavior
+	normalizedSessionName := normalizeSessionName(serverName)
+	
+	// Check if session already exists
+	if m.SessionExists(normalizedSessionName) {
+		// Session exists, just return it for reattachment
+		return normalizedSessionName, true, nil
+	}
+
+	// Session doesn't exist, create a new one
+	// Generate unique session name (this will handle conflicts with other sessions)
 	sessionName := m.generateUniqueSessionName(serverName)
 
 	// Create the tmux session
 	err := m.CreateSession(sessionName)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
 	// Send the SSH command to the session
 	err = m.SendKeys(sessionName, sshCommand)
 	if err != nil {
-		return "", err
+		return "", false, err
 	}
 
-	return sessionName, nil
+	return sessionName, false, nil
 }
 
 // SessionExists checks if a session with the given name exists

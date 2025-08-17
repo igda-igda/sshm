@@ -68,20 +68,30 @@ func runConnectCommand(args []string, output io.Writer) error {
   fmt.Fprintf(output, "🔌 Connecting to %s (%s@%s:%d)...\n", 
     server.Name, server.Username, server.Hostname, server.Port)
 
-  // Create tmux session and connect
-  sessionName, err := tmuxManager.ConnectToServer(server.Name, sshCommand)
+  // Create tmux session and connect (or reattach to existing)
+  sessionName, wasExisting, err := tmuxManager.ConnectToServer(server.Name, sshCommand)
   if err != nil {
     return fmt.Errorf("❌ Failed to create tmux session: %w", err)
   }
 
-  fmt.Fprintf(output, "📺 Created tmux session: %s\n", sessionName)
-  fmt.Fprintf(output, "⚡ SSH command sent to session\n")
+  if wasExisting {
+    fmt.Fprintf(output, "🔄 Found existing tmux session: %s\n", sessionName)
+    fmt.Fprintf(output, "♻️  Reattaching to existing session\n")
+  } else {
+    fmt.Fprintf(output, "📺 Created tmux session: %s\n", sessionName)
+    fmt.Fprintf(output, "⚡ SSH command sent to session\n")
+  }
 
   // Attach to the session
   fmt.Fprintf(output, "🔗 Attaching to session...\n")
   err = tmuxManager.AttachSession(sessionName)
   if err != nil {
-    return fmt.Errorf("❌ Failed to attach to session: %w", err)
+    // Don't fail the entire command if attach fails - provide manual instructions
+    fmt.Fprintf(output, "⚠️  Automatic attach failed (this can happen in non-TTY environments)\n")
+    fmt.Fprintf(output, "💡 To manually attach to your session, run:\n")
+    fmt.Fprintf(output, "   tmux attach-session -t %s\n", sessionName)
+    fmt.Fprintf(output, "✅ Session %s is ready for connection!\n", sessionName)
+    return nil
   }
 
   fmt.Fprintf(output, "✅ Connected to %s successfully!\n", server.Name)
@@ -94,8 +104,8 @@ func buildSSHCommand(server config.Server) (string, error) {
     return "", fmt.Errorf("❌ Invalid server configuration: %w", err)
   }
 
-  // Build base SSH command
-  sshCmd := fmt.Sprintf("ssh %s@%s", server.Username, server.Hostname)
+  // Build base SSH command with pseudo-terminal allocation
+  sshCmd := fmt.Sprintf("ssh -t %s@%s", server.Username, server.Hostname)
   
   // Add port if not default
   if server.Port != 22 {

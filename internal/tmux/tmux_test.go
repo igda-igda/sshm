@@ -316,12 +316,13 @@ func TestAttachSession(t *testing.T) {
 
 func TestConnectToServer(t *testing.T) {
   tests := []struct {
-    name         string
-    serverName   string
-    sshCommand   string
-    mockCmd      func(name string, arg ...string) *exec.Cmd
-    expectError  bool
+    name            string
+    serverName      string
+    sshCommand      string
+    mockCmd         func(name string, arg ...string) *exec.Cmd
+    expectError     bool
     expectedSession string
+    expectedExisting bool
   }{
     {
       name:       "connect to new server",
@@ -330,18 +331,31 @@ func TestConnectToServer(t *testing.T) {
       mockCmd: func(name string, arg ...string) *exec.Cmd {
         return exec.Command("echo", "connected")
       },
-      expectError:     false,
-      expectedSession: "production-api",
+      expectError:      false,
+      expectedSession:  "production-api",
+      expectedExisting: false,
     },
     {
-      name:       "connect with session conflict",
+      name:       "reattach to existing session",
       serverName: "production-api",
       sshCommand: "ssh deploy@api.prod.company.com",
       mockCmd: func(name string, arg ...string) *exec.Cmd {
         return exec.Command("echo", "connected")
       },
-      expectError:     false,
-      expectedSession: "production-api-1",
+      expectError:      false,
+      expectedSession:  "production-api",
+      expectedExisting: true,
+    },
+    {
+      name:       "reattach to existing session with dots",
+      serverName: "cloudcrafters.cloud",
+      sshCommand: "ssh user@cloudcrafters.cloud",
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        return exec.Command("echo", "connected")
+      },
+      expectError:      false,
+      expectedSession:  "cloudcrafters_cloud",
+      expectedExisting: true,
     },
   }
 
@@ -352,17 +366,22 @@ func TestConnectToServer(t *testing.T) {
       execCommand = tt.mockCmd
 
       manager := &Manager{}
-      if tt.name == "connect with session conflict" {
+      if tt.name == "reattach to existing session" {
         manager.existingSessions = []string{"production-api"}
+      } else if tt.name == "reattach to existing session with dots" {
+        manager.existingSessions = []string{"cloudcrafters_cloud"}
       }
 
-      sessionName, err := manager.ConnectToServer(tt.serverName, tt.sshCommand)
+      sessionName, wasExisting, err := manager.ConnectToServer(tt.serverName, tt.sshCommand)
       if (err != nil) != tt.expectError {
         t.Errorf("ConnectToServer() error = %v, expectError %v", err, tt.expectError)
         return
       }
       if sessionName != tt.expectedSession {
         t.Errorf("ConnectToServer() sessionName = %v, want %v", sessionName, tt.expectedSession)
+      }
+      if wasExisting != tt.expectedExisting {
+        t.Errorf("ConnectToServer() wasExisting = %v, want %v", wasExisting, tt.expectedExisting)
       }
     })
   }
