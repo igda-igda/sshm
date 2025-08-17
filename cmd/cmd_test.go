@@ -422,3 +422,435 @@ func setupMockStdin(inputs []string) func() {
     os.Stdin = original
   }
 }
+
+// Profile-related test helpers
+
+func setupTestProfiles(configDir string) {
+  configContent := `servers:
+  - name: "web-dev"
+    hostname: "dev.example.com"
+    port: 22
+    username: "devuser"
+    auth_type: "key"
+    key_path: "~/.ssh/dev_key"
+  - name: "db-dev"
+    hostname: "db-dev.example.com"
+    port: 22
+    username: "devuser"
+    auth_type: "key"
+    key_path: "~/.ssh/dev_key"
+  - name: "web-prod"
+    hostname: "prod.example.com"
+    port: 22
+    username: "produser"
+    auth_type: "key"
+    key_path: "~/.ssh/prod_key"
+profiles:
+  - name: "development"
+    description: "Development environment servers"
+    servers: ["web-dev", "db-dev"]
+  - name: "production"
+    description: "Production environment servers"
+    servers: ["web-prod"]
+`
+  
+  configPath := filepath.Join(configDir, "config.yaml")
+  err := os.WriteFile(configPath, []byte(configContent), 0600)
+  if err != nil {
+    panic(fmt.Sprintf("Failed to write test config with profiles: %v", err))
+  }
+}
+
+// Profile command tests
+
+func TestProfileCreateCommand(t *testing.T) {
+  tests := []struct {
+    name        string
+    args        []string
+    inputs      []string
+    setupFn     func(string)
+    expectError bool
+    contains    string
+  }{
+    {
+      name: "successful profile creation",
+      args: []string{"staging"},
+      inputs: []string{
+        "Staging environment servers", // description
+      },
+      setupFn:     func(configDir string) { setupTestServers(configDir) },
+      expectError: false,
+      contains:    "Profile 'staging' created successfully",
+    },
+    {
+      name: "profile creation with empty description",
+      args: []string{"testing"},
+      inputs: []string{
+        "", // empty description
+      },
+      setupFn:     func(configDir string) { setupTestServers(configDir) },
+      expectError: false,
+      contains:    "Profile 'testing' created successfully",
+    },
+    {
+      name:        "missing profile name",
+      args:        []string{},
+      expectError: true,
+      contains:    "accepts 1 arg(s), received 0",
+    },
+    {
+      name: "duplicate profile name",
+      args: []string{"development"},
+      inputs: []string{
+        "Another development environment",
+      },
+      setupFn:     func(configDir string) { setupTestProfiles(configDir) },
+      expectError: true,
+      contains:    "already exists",
+    },
+  }
+
+  for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+      tmpDir := setupTestConfig(t)
+      defer os.RemoveAll(tmpDir)
+
+      if tt.setupFn != nil {
+        tt.setupFn(tmpDir)
+      }
+
+      restoreStdin := setupMockStdin(tt.inputs)
+      defer restoreStdin()
+
+      var output bytes.Buffer
+      
+      // Create a new root command for this test
+      testRootCmd := &cobra.Command{Use: "sshm"}
+      testRootCmd.AddCommand(profileCmd)
+      
+      args := append([]string{"profile", "create"}, tt.args...)
+      testRootCmd.SetArgs(args)
+      testRootCmd.SetOut(&output)
+      testRootCmd.SetErr(&output)
+
+      err := testRootCmd.Execute()
+      outputStr := output.String()
+
+      if tt.expectError && err == nil {
+        t.Errorf("Expected error but got none. Output: %s", outputStr)
+      }
+      if !tt.expectError && err != nil {
+        t.Errorf("Unexpected error: %v. Output: %s", err, outputStr)
+      }
+      if tt.contains != "" && !strings.Contains(outputStr, tt.contains) {
+        t.Errorf("Expected output to contain '%s', got: %s", tt.contains, outputStr)
+      }
+    })
+  }
+}
+
+func TestProfileListCommand(t *testing.T) {
+  tests := []struct {
+    name     string
+    setupFn  func(string)
+    contains []string
+    notContains []string
+  }{
+    {
+      name:     "empty profiles",
+      setupFn:  func(configDir string) { setupTestServers(configDir) },
+      contains: []string{"No profiles configured"},
+    },
+    {
+      name: "list with profiles",
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      contains: []string{"development", "production", "Development environment servers", "Production environment servers"},
+    },
+  }
+
+  for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+      tmpDir := setupTestConfig(t)
+      defer os.RemoveAll(tmpDir)
+
+      if tt.setupFn != nil {
+        tt.setupFn(tmpDir)
+      }
+
+      var output bytes.Buffer
+      
+      testRootCmd := &cobra.Command{Use: "sshm"}
+      testRootCmd.AddCommand(profileCmd)
+      
+      testRootCmd.SetArgs([]string{"profile", "list"})
+      testRootCmd.SetOut(&output)
+      testRootCmd.SetErr(&output)
+      
+      err := testRootCmd.Execute()
+      if err != nil {
+        t.Errorf("Unexpected error: %v", err)
+      }
+
+      outputStr := output.String()
+      for _, expectedContent := range tt.contains {
+        if !strings.Contains(outputStr, expectedContent) {
+          t.Errorf("Expected output to contain '%s', got: %s", expectedContent, outputStr)
+        }
+      }
+      for _, notExpected := range tt.notContains {
+        if strings.Contains(outputStr, notExpected) {
+          t.Errorf("Expected output to NOT contain '%s', got: %s", notExpected, outputStr)
+        }
+      }
+    })
+  }
+}
+
+func TestProfileDeleteCommand(t *testing.T) {
+  tests := []struct {
+    name        string
+    args        []string
+    setupFn     func(string)
+    inputs      []string
+    expectError bool
+    contains    string
+  }{
+    {
+      name: "successful profile deletion with confirmation",
+      args: []string{"development"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      inputs:      []string{"y"},
+      expectError: false,
+      contains:    "Profile 'development' deleted successfully",
+    },
+    {
+      name: "cancelled profile deletion",
+      args: []string{"development"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      inputs:      []string{"n"},
+      expectError: false,
+      contains:    "Deletion cancelled",
+    },
+    {
+      name:        "missing profile name",
+      args:        []string{},
+      expectError: true,
+      contains:    "accepts 1 arg(s), received 0",
+    },
+    {
+      name:        "non-existent profile",
+      args:        []string{"non-existent"},
+      setupFn:     func(configDir string) { setupTestProfiles(configDir) },
+      expectError: true,
+      contains:    "not found",
+    },
+  }
+
+  for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+      tmpDir := setupTestConfig(t)
+      defer os.RemoveAll(tmpDir)
+
+      if tt.setupFn != nil {
+        tt.setupFn(tmpDir)
+      }
+
+      restoreStdin := setupMockStdin(tt.inputs)
+      defer restoreStdin()
+
+      var output bytes.Buffer
+      
+      testRootCmd := &cobra.Command{Use: "sshm"}
+      testRootCmd.AddCommand(profileCmd)
+      
+      args := append([]string{"profile", "delete"}, tt.args...)
+      testRootCmd.SetArgs(args)
+      testRootCmd.SetOut(&output)
+      testRootCmd.SetErr(&output)
+
+      err := testRootCmd.Execute()
+      outputStr := output.String()
+
+      if tt.expectError && err == nil {
+        t.Errorf("Expected error but got none. Output: %s", outputStr)
+      }
+      if !tt.expectError && err != nil {
+        t.Errorf("Unexpected error: %v. Output: %s", err, outputStr)
+      }
+      if tt.contains != "" && !strings.Contains(outputStr, tt.contains) {
+        t.Errorf("Expected output to contain '%s', got: %s", tt.contains, outputStr)
+      }
+    })
+  }
+}
+
+func TestProfileAssignCommand(t *testing.T) {
+  tests := []struct {
+    name        string
+    args        []string
+    setupFn     func(string)
+    expectError bool
+    contains    string
+  }{
+    {
+      name: "successful server assignment",
+      args: []string{"web-dev", "production"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      expectError: false,
+      contains:    "Server 'web-dev' assigned to profile 'production'",
+    },
+    {
+      name: "assign already assigned server",
+      args: []string{"web-dev", "development"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      expectError: false,
+      contains:    "Server 'web-dev' assigned to profile 'development'",
+    },
+    {
+      name:        "missing arguments",
+      args:        []string{"web-dev"},
+      expectError: true,
+      contains:    "accepts 2 arg(s), received 1",
+    },
+    {
+      name: "non-existent server",
+      args: []string{"non-existent", "development"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      expectError: true,
+      contains:    "not found",
+    },
+    {
+      name: "non-existent profile",
+      args: []string{"web-dev", "non-existent"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      expectError: true,
+      contains:    "not found",
+    },
+  }
+
+  for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+      tmpDir := setupTestConfig(t)
+      defer os.RemoveAll(tmpDir)
+
+      if tt.setupFn != nil {
+        tt.setupFn(tmpDir)
+      }
+
+      var output bytes.Buffer
+      
+      testRootCmd := &cobra.Command{Use: "sshm"}
+      testRootCmd.AddCommand(profileCmd)
+      
+      args := append([]string{"profile", "assign"}, tt.args...)
+      testRootCmd.SetArgs(args)
+      testRootCmd.SetOut(&output)
+      testRootCmd.SetErr(&output)
+
+      err := testRootCmd.Execute()
+      outputStr := output.String()
+
+      if tt.expectError && err == nil {
+        t.Errorf("Expected error but got none. Output: %s", outputStr)
+      }
+      if !tt.expectError && err != nil {
+        t.Errorf("Unexpected error: %v. Output: %s", err, outputStr)
+      }
+      if tt.contains != "" && !strings.Contains(outputStr, tt.contains) {
+        t.Errorf("Expected output to contain '%s', got: %s", tt.contains, outputStr)
+      }
+    })
+  }
+}
+
+func TestProfileUnassignCommand(t *testing.T) {
+  tests := []struct {
+    name        string
+    args        []string
+    setupFn     func(string)
+    expectError bool
+    contains    string
+  }{
+    {
+      name: "successful server unassignment",
+      args: []string{"web-dev", "development"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      expectError: false,
+      contains:    "Server 'web-dev' unassigned from profile 'development'",
+    },
+    {
+      name:        "missing arguments",
+      args:        []string{"web-dev"},
+      expectError: true,
+      contains:    "accepts 2 arg(s), received 1",
+    },
+    {
+      name: "server not in profile",
+      args: []string{"web-prod", "development"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      expectError: true,
+      contains:    "is not assigned to profile",
+    },
+    {
+      name: "non-existent profile",
+      args: []string{"web-dev", "non-existent"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      expectError: true,
+      contains:    "not found",
+    },
+  }
+
+  for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+      tmpDir := setupTestConfig(t)
+      defer os.RemoveAll(tmpDir)
+
+      if tt.setupFn != nil {
+        tt.setupFn(tmpDir)
+      }
+
+      var output bytes.Buffer
+      
+      testRootCmd := &cobra.Command{Use: "sshm"}
+      testRootCmd.AddCommand(profileCmd)
+      
+      args := append([]string{"profile", "unassign"}, tt.args...)
+      testRootCmd.SetArgs(args)
+      testRootCmd.SetOut(&output)
+      testRootCmd.SetErr(&output)
+
+      err := testRootCmd.Execute()
+      outputStr := output.String()
+
+      if tt.expectError && err == nil {
+        t.Errorf("Expected error but got none. Output: %s", outputStr)
+      }
+      if !tt.expectError && err != nil {
+        t.Errorf("Unexpected error: %v. Output: %s", err, outputStr)
+      }
+      if tt.contains != "" && !strings.Contains(outputStr, tt.contains) {
+        t.Errorf("Expected output to contain '%s', got: %s", tt.contains, outputStr)
+      }
+    })
+  }
+}

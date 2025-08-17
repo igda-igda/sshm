@@ -67,6 +67,7 @@ Examples:
   cmd.AddCommand(listCmd)
   cmd.AddCommand(removeCmd)
   cmd.AddCommand(connectCmd)
+  cmd.AddCommand(profileCmd)
   
   return cmd
 }
@@ -76,4 +77,5 @@ func init() {
   rootCmd.AddCommand(listCmd)
   rootCmd.AddCommand(removeCmd)
   rootCmd.AddCommand(connectCmd)
+  rootCmd.AddCommand(profileCmd)
 }
