@@ -5,11 +5,13 @@ import (
   "fmt"
   "io"
   "os"
+  "os/exec"
   "path/filepath"
   "strings"
   "testing"
 
   "github.com/spf13/cobra"
+  "sshm/internal/tmux"
 )
 
 // Test helpers and mocks
@@ -1080,4 +1082,205 @@ profiles:
   if err != nil {
     panic(fmt.Sprintf("Failed to write test config with empty profile: %v", err))
   }
+}
+
+func TestSessionsListCommand(t *testing.T) {
+	tests := []struct {
+		name         string
+		mockSessions []string
+		expectError  bool
+		expectedContent string
+	}{
+		{
+			name:         "no active sessions",
+			mockSessions: []string{},
+			expectError:  false,
+			expectedContent: "No active tmux sessions found",
+		},
+		{
+			name:         "single session",
+			mockSessions: []string{"production-web"},
+			expectError:  false,
+			expectedContent: "Active sessions: 1",
+		},
+		{
+			name:         "multiple sessions with different types",
+			mockSessions: []string{"development", "staging_server", "production-api"},
+			expectError:  false,
+			expectedContent: "Active sessions: 3",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create temporary test directory
+			testDir := t.TempDir()
+			t.Setenv("SSHM_CONFIG_DIR", testDir)
+
+			// Mock tmux command for sessions list
+			oldExecCommand := tmux.GetExecCommand()
+			defer tmux.SetExecCommand(oldExecCommand)
+
+			tmux.SetExecCommand(func(name string, arg ...string) *exec.Cmd {
+				if name == "tmux" && len(arg) > 0 {
+					if arg[0] == "-V" {
+						// tmux version check
+						return exec.Command("echo", "tmux version")
+					} else if arg[0] == "list-sessions" {
+						// list sessions
+						if len(tt.mockSessions) == 0 {
+							return exec.Command("echo", "")
+						}
+						output := ""
+						for i, session := range tt.mockSessions {
+							if i > 0 {
+								output += "\n"
+							}
+							output += session
+						}
+						return exec.Command("echo", output)
+					}
+				}
+				return exec.Command("echo", "")
+			})
+
+			var output strings.Builder
+			err := runSessionsListCommand(&output)
+
+			if (err != nil) != tt.expectError {
+				t.Errorf("runSessionsListCommand() error = %v, expectError %v", err, tt.expectError)
+				return
+			}
+
+			if !strings.Contains(output.String(), tt.expectedContent) {
+				t.Errorf("runSessionsListCommand() output = %v, expected to contain %v", output.String(), tt.expectedContent)
+			}
+		})
+	}
+}
+
+func TestSessionsKillCommand(t *testing.T) {
+	tests := []struct {
+		name         string
+		sessionName  string
+		mockSessions []string
+		expectError  bool
+		expectedContent string
+	}{
+		{
+			name:         "kill existing session",
+			sessionName:  "test-session",
+			mockSessions: []string{"test-session", "other-session"},
+			expectError:  false,
+			expectedContent: "terminated successfully",
+		},
+		{
+			name:         "kill non-existent session",
+			sessionName:  "non-existent",
+			mockSessions: []string{"test-session"},
+			expectError:  true,
+			expectedContent: "Session 'non-existent' not found",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create temporary test directory
+			testDir := t.TempDir()
+			t.Setenv("SSHM_CONFIG_DIR", testDir)
+
+			// Mock tmux command
+			oldExecCommand := tmux.GetExecCommand()
+			defer tmux.SetExecCommand(oldExecCommand)
+
+			tmux.SetExecCommand(func(name string, arg ...string) *exec.Cmd {
+				if name == "tmux" && len(arg) > 0 {
+					if arg[0] == "-V" {
+						// tmux version check
+						return exec.Command("echo", "tmux version")
+					} else if arg[0] == "list-sessions" {
+						// list sessions
+						if len(tt.mockSessions) == 0 {
+							return exec.Command("echo", "")
+						}
+						output := ""
+						for i, session := range tt.mockSessions {
+							if i > 0 {
+								output += "\n"
+							}
+							output += session
+						}
+						return exec.Command("echo", output)
+					} else if arg[0] == "kill-session" {
+						// kill session - just succeed
+						return exec.Command("echo", "session killed")
+					}
+				}
+				return exec.Command("echo", "")
+			})
+
+			var output strings.Builder
+			err := runSessionsKillCommand(tt.sessionName, &output)
+
+			if (err != nil) != tt.expectError {
+				t.Errorf("runSessionsKillCommand() error = %v, expectError %v", err, tt.expectError)
+				return
+			}
+
+			if tt.expectError {
+				// For error cases, check the error message
+				if err != nil && !strings.Contains(err.Error(), tt.expectedContent) {
+					t.Errorf("runSessionsKillCommand() error = %v, expected to contain %v", err.Error(), tt.expectedContent)
+				}
+			} else {
+				// For success cases, check the output
+				if !strings.Contains(output.String(), tt.expectedContent) {
+					t.Errorf("runSessionsKillCommand() output = %v, expected to contain %v", output.String(), tt.expectedContent)
+				}
+			}
+		})
+	}
+}
+
+func TestIsGroupSession(t *testing.T) {
+	tests := []struct {
+		name        string
+		sessionName string
+		expected    bool
+	}{
+		{
+			name:        "simple profile name",
+			sessionName: "development",
+			expected:    true,
+		},
+		{
+			name:        "profile name with conflict resolution",
+			sessionName: "staging-1",
+			expected:    false,
+		},
+		{
+			name:        "server with normalized dots",
+			sessionName: "api_server_com",
+			expected:    false,
+		},
+		{
+			name:        "simple server name",
+			sessionName: "webserver",
+			expected:    true,
+		},
+		{
+			name:        "server with underscores",
+			sessionName: "db_primary",
+			expected:    false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := isGroupSession(tt.sessionName)
+			if result != tt.expected {
+				t.Errorf("isGroupSession() = %v, want %v", result, tt.expected)
+			}
+		})
+	}
 }

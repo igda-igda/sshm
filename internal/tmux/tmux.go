@@ -10,6 +10,16 @@ import (
 // execCommand is a variable to allow mocking in tests
 var execCommand = exec.Command
 
+// GetExecCommand returns the current execCommand function for testing
+func GetExecCommand() func(string, ...string) *exec.Cmd {
+	return execCommand
+}
+
+// SetExecCommand sets the execCommand function for testing
+func SetExecCommand(fn func(string, ...string) *exec.Cmd) {
+	execCommand = fn
+}
+
 // Manager handles tmux session operations
 type Manager struct {
 	// For testing purposes, we can inject existing sessions

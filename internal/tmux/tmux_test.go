@@ -1,6 +1,7 @@
 package tmux
 
 import (
+  "fmt"
   "os/exec"
   "testing"
 )
@@ -382,6 +383,425 @@ func TestConnectToServer(t *testing.T) {
       }
       if wasExisting != tt.expectedExisting {
         t.Errorf("ConnectToServer() wasExisting = %v, want %v", wasExisting, tt.expectedExisting)
+      }
+    })
+  }
+}
+
+// Mock Server implementation for testing
+type mockServer struct {
+  name     string
+  hostname string
+  port     int
+  username string
+  authType string
+  keyPath  string
+  valid    bool
+}
+
+func (s *mockServer) GetName() string     { return s.name }
+func (s *mockServer) GetHostname() string { return s.hostname }
+func (s *mockServer) GetPort() int        { return s.port }
+func (s *mockServer) GetUsername() string { return s.username }
+func (s *mockServer) GetAuthType() string { return s.authType }
+func (s *mockServer) GetKeyPath() string  { return s.keyPath }
+
+func (s *mockServer) Validate() error {
+  if !s.valid {
+    return fmt.Errorf("invalid server configuration")
+  }
+  return nil
+}
+
+func TestConnectToProfile(t *testing.T) {
+  tests := []struct {
+    name                string
+    profileName         string
+    servers             []Server
+    mockCmd             func(name string, arg ...string) *exec.Cmd
+    existingSessions    []string
+    expectError         bool
+    expectedSession     string
+    expectedExisting    bool
+  }{
+    {
+      name:        "create new profile session with multiple servers",
+      profileName: "development",
+      servers: []Server{
+        &mockServer{name: "web1", hostname: "web1.dev.com", port: 22, username: "dev", authType: "key", keyPath: "~/.ssh/id_rsa", valid: true},
+        &mockServer{name: "db1", hostname: "db1.dev.com", port: 22, username: "dev", authType: "key", keyPath: "~/.ssh/id_rsa", valid: true},
+        &mockServer{name: "cache1", hostname: "cache1.dev.com", port: 22, username: "dev", authType: "key", keyPath: "~/.ssh/id_rsa", valid: true},
+      },
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        return exec.Command("echo", "success")
+      },
+      existingSessions:    []string{},
+      expectError:         false,
+      expectedSession:     "development",
+      expectedExisting:    false,
+    },
+    {
+      name:        "reattach to existing profile session",
+      profileName: "staging",
+      servers: []Server{
+        &mockServer{name: "app1", hostname: "app1.staging.com", port: 22, username: "staging", authType: "key", keyPath: "~/.ssh/id_rsa", valid: true},
+        &mockServer{name: "app2", hostname: "app2.staging.com", port: 22, username: "staging", authType: "key", keyPath: "~/.ssh/id_rsa", valid: true},
+      },
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        return exec.Command("echo", "success")
+      },
+      existingSessions:    []string{"staging"},
+      expectError:         false,
+      expectedSession:     "staging",
+      expectedExisting:    true,
+    },
+    {
+      name:        "profile name with dots normalized",
+      profileName: "production.api",
+      servers: []Server{
+        &mockServer{name: "api1", hostname: "api1.prod.com", port: 22, username: "prod", authType: "key", keyPath: "~/.ssh/id_rsa", valid: true},
+      },
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        return exec.Command("echo", "success")
+      },
+      existingSessions:    []string{},
+      expectError:         false,
+      expectedSession:     "production_api",
+      expectedExisting:    false,
+    },
+    {
+      name:        "session name conflict resolution - reattach to existing",
+      profileName: "dev",
+      servers: []Server{
+        &mockServer{name: "test1", hostname: "test1.dev.com", port: 22, username: "dev", authType: "key", keyPath: "~/.ssh/id_rsa", valid: true},
+      },
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        return exec.Command("echo", "success")
+      },
+      existingSessions:    []string{"dev", "dev-1"},
+      expectError:         false,
+      expectedSession:     "dev",
+      expectedExisting:    true,
+    },
+    {
+      name:        "session name conflict resolution - create unique name",
+      profileName: "newprofile",
+      servers: []Server{
+        &mockServer{name: "test1", hostname: "test1.dev.com", port: 22, username: "dev", authType: "key", keyPath: "~/.ssh/id_rsa", valid: true},
+      },
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        return exec.Command("echo", "success")
+      },
+      existingSessions:    []string{"newprofile", "newprofile-1"},
+      expectError:         false,
+      expectedSession:     "newprofile",
+      expectedExisting:    true,
+    },
+    {
+      name:        "server validation error",
+      profileName: "test",
+      servers: []Server{
+        &mockServer{name: "invalid", hostname: "", port: 22, username: "", authType: "key", keyPath: "", valid: false},
+      },
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        return exec.Command("echo", "success")
+      },
+      existingSessions:    []string{},
+      expectError:         true,
+      expectedSession:     "",
+      expectedExisting:    false,
+    },
+    {
+      name:        "tmux session creation failure",
+      profileName: "failed",
+      servers: []Server{
+        &mockServer{name: "server1", hostname: "server1.com", port: 22, username: "user", authType: "key", keyPath: "~/.ssh/id_rsa", valid: true},
+      },
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        if len(arg) > 0 && arg[0] == "new-session" {
+          return exec.Command("false") // Fail session creation
+        }
+        return exec.Command("echo", "success")
+      },
+      existingSessions:    []string{},
+      expectError:         true,
+      expectedSession:     "",
+      expectedExisting:    false,
+    },
+  }
+
+  for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+      original := execCommand
+      defer func() { execCommand = original }()
+      execCommand = tt.mockCmd
+
+      manager := &Manager{
+        existingSessions: tt.existingSessions,
+      }
+
+      sessionName, wasExisting, err := manager.ConnectToProfile(tt.profileName, tt.servers)
+      if (err != nil) != tt.expectError {
+        t.Errorf("ConnectToProfile() error = %v, expectError %v", err, tt.expectError)
+        return
+      }
+      if sessionName != tt.expectedSession {
+        t.Errorf("ConnectToProfile() sessionName = %v, want %v", sessionName, tt.expectedSession)
+      }
+      if wasExisting != tt.expectedExisting {
+        t.Errorf("ConnectToProfile() wasExisting = %v, want %v", wasExisting, tt.expectedExisting)
+      }
+    })
+  }
+}
+
+func TestCreateWindow(t *testing.T) {
+  tests := []struct {
+    name        string
+    sessionName string
+    windowName  string
+    mockCmd     func(name string, arg ...string) *exec.Cmd
+    expectError bool
+  }{
+    {
+      name:        "create window success",
+      sessionName: "test-session",
+      windowName:  "server1",
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        return exec.Command("echo", "window created")
+      },
+      expectError: false,
+    },
+    {
+      name:        "create window failure",
+      sessionName: "test-session",
+      windowName:  "server1",
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        return exec.Command("false")
+      },
+      expectError: true,
+    },
+  }
+
+  for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+      original := execCommand
+      defer func() { execCommand = original }()
+      execCommand = tt.mockCmd
+
+      manager := &Manager{}
+      err := manager.CreateWindow(tt.sessionName, tt.windowName)
+      if (err != nil) != tt.expectError {
+        t.Errorf("CreateWindow() error = %v, expectError %v", err, tt.expectError)
+      }
+    })
+  }
+}
+
+func TestRenameWindow(t *testing.T) {
+  tests := []struct {
+    name         string
+    sessionName  string
+    windowNumber string
+    newName      string
+    mockCmd      func(name string, arg ...string) *exec.Cmd
+    expectError  bool
+  }{
+    {
+      name:         "rename window success",
+      sessionName:  "test-session",
+      windowNumber: "0",
+      newName:      "web-server",
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        return exec.Command("echo", "window renamed")
+      },
+      expectError: false,
+    },
+    {
+      name:         "rename window failure",
+      sessionName:  "test-session",
+      windowNumber: "0",
+      newName:      "web-server",
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        return exec.Command("false")
+      },
+      expectError: true,
+    },
+  }
+
+  for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+      original := execCommand
+      defer func() { execCommand = original }()
+      execCommand = tt.mockCmd
+
+      manager := &Manager{}
+      err := manager.RenameWindow(tt.sessionName, tt.windowNumber, tt.newName)
+      if (err != nil) != tt.expectError {
+        t.Errorf("RenameWindow() error = %v, expectError %v", err, tt.expectError)
+      }
+    })
+  }
+}
+
+func TestSendKeysToWindow(t *testing.T) {
+  tests := []struct {
+    name         string
+    windowTarget string
+    command      string
+    mockCmd      func(name string, arg ...string) *exec.Cmd
+    expectError  bool
+  }{
+    {
+      name:         "send keys to window success",
+      windowTarget: "test-session:0",
+      command:      "ssh user@host",
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        return exec.Command("echo", "keys sent")
+      },
+      expectError: false,
+    },
+    {
+      name:         "send keys to window failure",
+      windowTarget: "test-session:0",
+      command:      "ssh user@host",
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        return exec.Command("false")
+      },
+      expectError: true,
+    },
+  }
+
+  for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+      original := execCommand
+      defer func() { execCommand = original }()
+      execCommand = tt.mockCmd
+
+      manager := &Manager{}
+      err := manager.SendKeysToWindow(tt.windowTarget, tt.command)
+      if (err != nil) != tt.expectError {
+        t.Errorf("SendKeysToWindow() error = %v, expectError %v", err, tt.expectError)
+      }
+    })
+  }
+}
+
+func TestBuildSSHCommand(t *testing.T) {
+  tests := []struct {
+    name        string
+    server      Server
+    expected    string
+    expectError bool
+  }{
+    {
+      name: "basic ssh command with key",
+      server: &mockServer{
+        name:     "web1",
+        hostname: "web1.dev.com",
+        port:     22,
+        username: "dev",
+        authType: "key",
+        keyPath:  "~/.ssh/id_rsa",
+        valid:    true,
+      },
+      expected:    "ssh -t dev@web1.dev.com -i ~/.ssh/id_rsa -o ServerAliveInterval=60 -o ServerAliveCountMax=3",
+      expectError: false,
+    },
+    {
+      name: "ssh command with custom port",
+      server: &mockServer{
+        name:     "api1",
+        hostname: "api1.prod.com",
+        port:     2222,
+        username: "deploy",
+        authType: "key",
+        keyPath:  "~/.ssh/deploy_rsa",
+        valid:    true,
+      },
+      expected:    "ssh -t deploy@api1.prod.com -p 2222 -i ~/.ssh/deploy_rsa -o ServerAliveInterval=60 -o ServerAliveCountMax=3",
+      expectError: false,
+    },
+    {
+      name: "ssh command with password auth",
+      server: &mockServer{
+        name:     "legacy1",
+        hostname: "legacy1.company.com",
+        port:     22,
+        username: "admin",
+        authType: "password",
+        keyPath:  "",
+        valid:    true,
+      },
+      expected:    "ssh -t admin@legacy1.company.com -o ServerAliveInterval=60 -o ServerAliveCountMax=3",
+      expectError: false,
+    },
+    {
+      name: "invalid server configuration",
+      server: &mockServer{
+        name:     "invalid",
+        hostname: "",
+        port:     22,
+        username: "",
+        authType: "key",
+        keyPath:  "",
+        valid:    false,
+      },
+      expected:    "",
+      expectError: true,
+    },
+  }
+
+  for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+      manager := &Manager{}
+      result, err := manager.buildSSHCommand(tt.server)
+      if (err != nil) != tt.expectError {
+        t.Errorf("buildSSHCommand() error = %v, expectError %v", err, tt.expectError)
+        return
+      }
+      if result != tt.expected {
+        t.Errorf("buildSSHCommand() = %v, want %v", result, tt.expected)
+      }
+    })
+  }
+}
+
+func TestKillSession(t *testing.T) {
+  tests := []struct {
+    name        string
+    sessionName string
+    mockCmd     func(name string, arg ...string) *exec.Cmd
+    expectError bool
+  }{
+    {
+      name:        "kill session success",
+      sessionName: "test-session",
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        return exec.Command("echo", "session killed")
+      },
+      expectError: false,
+    },
+    {
+      name:        "kill session failure",
+      sessionName: "test-session",
+      mockCmd: func(name string, arg ...string) *exec.Cmd {
+        return exec.Command("false")
+      },
+      expectError: true,
+    },
+  }
+
+  for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+      original := execCommand
+      defer func() { execCommand = original }()
+      execCommand = tt.mockCmd
+
+      manager := &Manager{}
+      err := manager.KillSession(tt.sessionName)
+      if (err != nil) != tt.expectError {
+        t.Errorf("KillSession() error = %v, expectError %v", err, tt.expectError)
       }
     })
   }

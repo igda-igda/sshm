@@ -30,6 +30,7 @@ Examples:
   sshm connect production-web      # Connect to server in tmux session
   sshm batch --profile staging     # Connect to all staging servers
   sshm profile create development  # Create a new profile
+  sshm sessions list               # List active tmux sessions
   sshm remove production-web       # Remove server configuration`,
 }
 
@@ -70,6 +71,7 @@ Examples:
   sshm connect production-web      # Connect to server in tmux session
   sshm batch --profile staging     # Connect to all staging servers
   sshm profile create development  # Create a new profile
+  sshm sessions list               # List active tmux sessions
   sshm remove production-web       # Remove server configuration`,
   }
   
@@ -79,6 +81,7 @@ Examples:
   cmd.AddCommand(connectCmd)
   cmd.AddCommand(batchCmd)
   cmd.AddCommand(profileCmd)
+  cmd.AddCommand(sessionsCmd)
   
   return cmd
 }
@@ -90,4 +93,5 @@ func init() {
   rootCmd.AddCommand(connectCmd)
   rootCmd.AddCommand(batchCmd)
   rootCmd.AddCommand(profileCmd)
+  rootCmd.AddCommand(sessionsCmd)
 }
