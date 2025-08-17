@@ -23,23 +23,48 @@ The table shows:
   
 Examples:
   sshm list                     # List all servers
+  sshm list --profile dev       # List servers in 'dev' profile
   sshm list | grep production   # Filter production servers`,
   RunE: func(cmd *cobra.Command, args []string) error {
-    return runListCommand(cmd.OutOrStdout())
+    profile, _ := cmd.Flags().GetString("profile")
+    return runListCommand(cmd.OutOrStdout(), profile)
   },
 }
 
-func runListCommand(output io.Writer) error {
+func init() {
+  listCmd.Flags().StringP("profile", "p", "", "Filter servers by profile name")
+}
+
+func runListCommand(output io.Writer, profileName string) error {
   // Load configuration
   cfg, err := config.Load()
   if err != nil {
     return fmt.Errorf("❌ Failed to load configuration: %w", err)
   }
 
-  servers := cfg.GetServers()
+  var servers []config.Server
+  var contextMessage string
+
+  // Get servers based on profile filter
+  if profileName != "" {
+    servers, err = cfg.GetServersByProfile(profileName)
+    if err != nil {
+      return fmt.Errorf("❌ Profile '%s' not found", profileName)
+    }
+    contextMessage = fmt.Sprintf("Servers in profile '%s'", profileName)
+  } else {
+    servers = cfg.GetServers()
+    contextMessage = "All configured servers"
+  }
+
   if len(servers) == 0 {
-    fmt.Fprintln(output, "📋 No servers configured.")
-    fmt.Fprintln(output, "💡 Use 'sshm add <server-name>' to add a server.")
+    if profileName != "" {
+      fmt.Fprintf(output, "📋 No servers found in profile '%s'.\n", profileName)
+      fmt.Fprintln(output, "💡 Use 'sshm profile assign <server-name> <profile-name>' to assign servers to this profile.")
+    } else {
+      fmt.Fprintln(output, "📋 No servers configured.")
+      fmt.Fprintln(output, "💡 Use 'sshm add <server-name>' to add a server.")
+    }
     return nil
   }
 
@@ -66,7 +91,12 @@ func runListCommand(output io.Writer) error {
 
   w.Flush()
   
-  fmt.Fprintf(output, "\n📊 Total: %d server(s)\n", len(servers))
-  fmt.Fprintln(output, "💡 Use 'sshm connect <server-name>' to connect to a server")
+  fmt.Fprintf(output, "\n📊 %s: %d server(s)\n", contextMessage, len(servers))
+  if profileName != "" {
+    fmt.Fprintln(output, "💡 Use 'sshm connect <server-name>' to connect to a server")
+    fmt.Fprintln(output, "💡 Use 'sshm batch --profile "+profileName+"' to connect to all servers in this profile")
+  } else {
+    fmt.Fprintln(output, "💡 Use 'sshm connect <server-name>' to connect to a server")
+  }
   return nil
 }

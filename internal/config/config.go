@@ -20,6 +20,14 @@ type Server struct {
 	PassphraseProtected bool   `yaml:"passphrase_protected,omitempty" json:"passphrase_protected,omitempty"`
 }
 
+// Getter methods for tmux Server interface compatibility
+func (s *Server) GetName() string     { return s.Name }
+func (s *Server) GetHostname() string { return s.Hostname }
+func (s *Server) GetPort() int        { return s.Port }
+func (s *Server) GetUsername() string { return s.Username }
+func (s *Server) GetAuthType() string { return s.AuthType }
+func (s *Server) GetKeyPath() string  { return s.KeyPath }
+
 // Profile represents a profile configuration for organizing servers
 type Profile struct {
 	Name        string   `yaml:"name" json:"name"`

@@ -178,6 +178,135 @@ func (m *Manager) KillSession(sessionName string) error {
 	return nil
 }
 
+// Server interface for tmux operations - avoiding circular import
+type Server interface {
+	GetName() string
+	GetHostname() string
+	GetPort() int
+	GetUsername() string
+	GetAuthType() string
+	GetKeyPath() string
+	Validate() error
+}
+
+// ConnectToProfile creates a tmux session for a profile with multiple windows for servers
+func (m *Manager) ConnectToProfile(profileName string, servers []Server) (string, bool, error) {
+	// Check if tmux is available
+	if !m.IsAvailable() {
+		return "", false, fmt.Errorf("tmux is not available on this system")
+	}
+
+	// Normalize the session name to match tmux behavior  
+	normalizedSessionName := normalizeSessionName(profileName)
+
+	// Check if session already exists
+	if m.SessionExists(normalizedSessionName) {
+		// Session exists, just return it for reattachment
+		return normalizedSessionName, true, nil
+	}
+
+	// Session doesn't exist, create a new one
+	// Generate unique session name (this will handle conflicts with other sessions)
+	sessionName := m.generateUniqueSessionName(profileName)
+
+	// Create the tmux session
+	err := m.CreateSession(sessionName)
+	if err != nil {
+		return "", false, err
+	}
+
+	// Create windows for each server and send SSH commands
+	for i, server := range servers {
+		serverName := server.GetName()
+		
+		// Build SSH command for this server
+		sshCommand, err := m.buildSSHCommand(server)
+		if err != nil {
+			return "", false, fmt.Errorf("failed to build SSH command for %s: %w", serverName, err)
+		}
+
+		// Create new window for this server (except for the first one which uses the default window)
+		if i > 0 {
+			err = m.CreateWindow(sessionName, serverName)
+			if err != nil {
+				return "", false, fmt.Errorf("failed to create window for server %s: %w", serverName, err)
+			}
+		} else {
+			// Rename the default window to the first server name
+			err = m.RenameWindow(sessionName, "0", serverName)
+			if err != nil {
+				return "", false, fmt.Errorf("failed to rename first window to %s: %w", serverName, err)
+			}
+		}
+
+		// Send the SSH command to the appropriate window
+		windowTarget := fmt.Sprintf("%s:%d", sessionName, i)
+		err = m.SendKeysToWindow(windowTarget, sshCommand)
+		if err != nil {
+			return "", false, fmt.Errorf("failed to send SSH command to window %s: %w", windowTarget, err)
+		}
+	}
+
+	return sessionName, false, nil
+}
+
+// buildSSHCommand builds an SSH command string for a server
+func (m *Manager) buildSSHCommand(server Server) (string, error) {
+	// Validate server configuration
+	if err := server.Validate(); err != nil {
+		return "", fmt.Errorf("invalid server configuration: %w", err)
+	}
+
+	// Build base SSH command with pseudo-terminal allocation
+	sshCmd := fmt.Sprintf("ssh -t %s@%s", server.GetUsername(), server.GetHostname())
+
+	// Add port if not default
+	if server.GetPort() != 22 {
+		sshCmd += fmt.Sprintf(" -p %d", server.GetPort())
+	}
+
+	// Add key-specific options
+	if server.GetAuthType() == "key" && server.GetKeyPath() != "" {
+		sshCmd += fmt.Sprintf(" -i %s", server.GetKeyPath())
+	}
+
+	// Add common SSH options
+	sshCmd += " -o ServerAliveInterval=60 -o ServerAliveCountMax=3"
+
+	return sshCmd, nil
+}
+
+// CreateWindow creates a new window in an existing tmux session
+func (m *Manager) CreateWindow(sessionName, windowName string) error {
+	cmd := execCommand("tmux", "new-window", "-t", sessionName, "-n", windowName)
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("failed to create window '%s' in session '%s': %w", windowName, sessionName, err)
+	}
+	return nil
+}
+
+// RenameWindow renames an existing window in a tmux session
+func (m *Manager) RenameWindow(sessionName, windowNumber, newName string) error {
+	windowTarget := fmt.Sprintf("%s:%s", sessionName, windowNumber)
+	cmd := execCommand("tmux", "rename-window", "-t", windowTarget, newName)
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("failed to rename window %s to '%s': %w", windowTarget, newName, err)
+	}
+	return nil
+}
+
+// SendKeysToWindow sends a command to a specific window in a tmux session
+func (m *Manager) SendKeysToWindow(windowTarget, command string) error {
+	cmd := execCommand("tmux", "send-keys", "-t", windowTarget, command, "Enter")
+	err := cmd.Run()
+	if err != nil {
+		return fmt.Errorf("failed to send keys to window '%s': %w", windowTarget, err)
+	}
+	return nil
+}
+
 // contains checks if a string slice contains a specific value
 func contains(slice []string, item string) bool {
 	for _, s := range slice {

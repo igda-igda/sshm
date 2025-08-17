@@ -297,7 +297,7 @@ func TestConnectCommand(t *testing.T) {
       setupFn: func(configDir string) {
         setupTestServers(configDir)
       },
-      expectError: true, // Will fail because tmux isn't available in test
+      expectError: false, // Should succeed and gracefully handle tmux attach failure
       contains:    "Connecting to production-api",
     },
     {
@@ -852,5 +852,232 @@ func TestProfileUnassignCommand(t *testing.T) {
         t.Errorf("Expected output to contain '%s', got: %s", tt.contains, outputStr)
       }
     })
+  }
+}
+
+// Tests for profile-filtered operations
+
+func TestListCommandWithProfileFlag(t *testing.T) {
+  tests := []struct {
+    name        string
+    args        []string
+    setupFn     func(string)
+    expectError bool
+    contains    []string
+    notContains []string
+  }{
+    {
+      name: "list servers in development profile",
+      args: []string{"--profile", "development"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      expectError: false,
+      contains:    []string{"web-dev", "db-dev", "dev.example.com", "db-dev.example.com"},
+      notContains: []string{"web-prod", "prod.example.com"},
+    },
+    {
+      name: "list servers in production profile",
+      args: []string{"--profile", "production"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      expectError: false,
+      contains:    []string{"web-prod", "prod.example.com"},
+      notContains: []string{"web-dev", "db-dev", "dev.example.com"},
+    },
+    {
+      name: "non-existent profile",
+      args: []string{"--profile", "non-existent"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      expectError: true,
+      contains:    []string{"Profile 'non-existent' not found"},
+    },
+    {
+      name: "empty profile",
+      args: []string{"--profile", "empty"},
+      setupFn: func(configDir string) {
+        setupTestProfilesWithEmpty(configDir)
+      },
+      expectError: false,
+      contains:    []string{"No servers found in profile 'empty'"},
+    },
+  }
+
+  for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+      tmpDir := setupTestConfig(t)
+      defer os.RemoveAll(tmpDir)
+
+      if tt.setupFn != nil {
+        tt.setupFn(tmpDir)
+      }
+
+      var output bytes.Buffer
+      
+      testRootCmd := &cobra.Command{Use: "sshm"}
+      testRootCmd.AddCommand(listCmd)
+      
+      args := append([]string{"list"}, tt.args...)
+      testRootCmd.SetArgs(args)
+      testRootCmd.SetOut(&output)
+      testRootCmd.SetErr(&output)
+
+      err := testRootCmd.Execute()
+      outputStr := output.String()
+
+      if tt.expectError && err == nil {
+        t.Errorf("Expected error but got none. Output: %s", outputStr)
+      }
+      if !tt.expectError && err != nil {
+        t.Errorf("Unexpected error: %v. Output: %s", err, outputStr)
+      }
+
+      for _, expectedContent := range tt.contains {
+        if !strings.Contains(outputStr, expectedContent) {
+          t.Errorf("Expected output to contain '%s', got: %s", expectedContent, outputStr)
+        }
+      }
+      for _, notExpected := range tt.notContains {
+        if strings.Contains(outputStr, notExpected) {
+          t.Errorf("Expected output to NOT contain '%s', got: %s", notExpected, outputStr)
+        }
+      }
+    })
+  }
+}
+
+func TestBatchCommandWithProfileFlag(t *testing.T) {
+  tests := []struct {
+    name        string
+    args        []string
+    setupFn     func(string)
+    expectError bool
+    contains    []string
+  }{
+    {
+      name: "batch connect to development profile",
+      args: []string{"--profile", "development"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      expectError: false, // Should succeed and gracefully handle tmux attach failure
+      contains:    []string{"Creating group session for profile 'development'"},
+    },
+    {
+      name: "batch connect to production profile",
+      args: []string{"--profile", "production"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      expectError: false, // Should succeed and gracefully handle tmux attach failure
+      contains:    []string{"Creating group session for profile 'production'"},
+    },
+    {
+      name: "non-existent profile",
+      args: []string{"--profile", "non-existent"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      expectError: true,
+      contains:    []string{"Profile 'non-existent' not found"},
+    },
+    {
+      name: "empty profile",
+      args: []string{"--profile", "empty"},
+      setupFn: func(configDir string) {
+        setupTestProfilesWithEmpty(configDir)
+      },
+      expectError: true,
+      contains:    []string{"No servers found in profile 'empty'"},
+    },
+    {
+      name: "missing profile argument",
+      args: []string{"--profile"},
+      setupFn: func(configDir string) {
+        setupTestProfiles(configDir)
+      },
+      expectError: true,
+      contains:    []string{"flag needs an argument"},
+    },
+  }
+
+  for _, tt := range tests {
+    t.Run(tt.name, func(t *testing.T) {
+      tmpDir := setupTestConfig(t)
+      defer os.RemoveAll(tmpDir)
+
+      if tt.setupFn != nil {
+        tt.setupFn(tmpDir)
+      }
+
+      var output bytes.Buffer
+      
+      testRootCmd := &cobra.Command{Use: "sshm"}
+      testRootCmd.AddCommand(batchCmd)
+      
+      args := append([]string{"batch"}, tt.args...)
+      testRootCmd.SetArgs(args)
+      testRootCmd.SetOut(&output)
+      testRootCmd.SetErr(&output)
+
+      err := testRootCmd.Execute()
+      outputStr := output.String()
+
+      if tt.expectError && err == nil {
+        t.Errorf("Expected error but got none. Output: %s", outputStr)
+      }
+      if !tt.expectError && err != nil {
+        t.Errorf("Unexpected error: %v. Output: %s", err, outputStr)
+      }
+
+      for _, expectedContent := range tt.contains {
+        if !strings.Contains(outputStr, expectedContent) {
+          t.Errorf("Expected output to contain '%s', got: %s", expectedContent, outputStr)
+        }
+      }
+    })
+  }
+}
+
+// Additional test helper for profiles with empty profile
+func setupTestProfilesWithEmpty(configDir string) {
+  configContent := `servers:
+  - name: "web-dev"
+    hostname: "dev.example.com"
+    port: 22
+    username: "devuser"
+    auth_type: "key"
+    key_path: "~/.ssh/dev_key"
+  - name: "db-dev"
+    hostname: "db-dev.example.com"
+    port: 22
+    username: "devuser"
+    auth_type: "key"
+    key_path: "~/.ssh/dev_key"
+  - name: "web-prod"
+    hostname: "prod.example.com"
+    port: 22
+    username: "produser"
+    auth_type: "key"
+    key_path: "~/.ssh/prod_key"
+profiles:
+  - name: "development"
+    description: "Development environment servers"
+    servers: ["web-dev", "db-dev"]
+  - name: "production"
+    description: "Production environment servers"
+    servers: ["web-prod"]
+  - name: "empty"
+    description: "Empty profile for testing"
+    servers: []
+`
+  
+  configPath := filepath.Join(configDir, "config.yaml")
+  err := os.WriteFile(configPath, []byte(configContent), 0600)
+  if err != nil {
+    panic(fmt.Sprintf("Failed to write test config with empty profile: %v", err))
   }
 }

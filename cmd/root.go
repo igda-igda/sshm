@@ -20,11 +20,16 @@ Features:
   • Connect via SSH with automatic tmux session creation
   • Support for SSH keys and password authentication
   • Secure credential storage and management
+  • Group connections via profiles with individual tmux windows
+  • Profile-based server organization and filtering
 
 Examples:
   sshm add production-web          # Add a new server configuration
   sshm list                        # List all configured servers
+  sshm list --profile dev          # List servers in 'dev' profile
   sshm connect production-web      # Connect to server in tmux session
+  sshm batch --profile staging     # Connect to all staging servers
+  sshm profile create development  # Create a new profile
   sshm remove production-web       # Remove server configuration`,
 }
 
@@ -55,11 +60,16 @@ Features:
   • Connect via SSH with automatic tmux session creation
   • Support for SSH keys and password authentication
   • Secure credential storage and management
+  • Group connections via profiles with individual tmux windows
+  • Profile-based server organization and filtering
 
 Examples:
   sshm add production-web          # Add a new server configuration
   sshm list                        # List all configured servers
+  sshm list --profile dev          # List servers in 'dev' profile
   sshm connect production-web      # Connect to server in tmux session
+  sshm batch --profile staging     # Connect to all staging servers
+  sshm profile create development  # Create a new profile
   sshm remove production-web       # Remove server configuration`,
   }
   
@@ -67,6 +77,7 @@ Examples:
   cmd.AddCommand(listCmd)
   cmd.AddCommand(removeCmd)
   cmd.AddCommand(connectCmd)
+  cmd.AddCommand(batchCmd)
   cmd.AddCommand(profileCmd)
   
   return cmd
@@ -77,5 +88,6 @@ func init() {
   rootCmd.AddCommand(listCmd)
   rootCmd.AddCommand(removeCmd)
   rootCmd.AddCommand(connectCmd)
+  rootCmd.AddCommand(batchCmd)
   rootCmd.AddCommand(profileCmd)
 }
