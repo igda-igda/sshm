@@ -31,6 +31,8 @@ Examples:
   sshm batch --profile staging     # Connect to all staging servers
   sshm profile create development  # Create a new profile
   sshm sessions list               # List active tmux sessions
+  sshm import ~/.ssh/config        # Import servers from SSH config
+  sshm export servers.yaml         # Export configuration to file
   sshm remove production-web       # Remove server configuration`,
 }
 
@@ -72,6 +74,8 @@ Examples:
   sshm batch --profile staging     # Connect to all staging servers
   sshm profile create development  # Create a new profile
   sshm sessions list               # List active tmux sessions
+  sshm import ~/.ssh/config        # Import servers from SSH config
+  sshm export servers.yaml         # Export configuration to file
   sshm remove production-web       # Remove server configuration`,
   }
   
@@ -82,6 +86,8 @@ Examples:
   cmd.AddCommand(batchCmd)
   cmd.AddCommand(profileCmd)
   cmd.AddCommand(sessionsCmd)
+  cmd.AddCommand(importCmd)
+  cmd.AddCommand(exportCmd)
   
   return cmd
 }
@@ -94,4 +100,6 @@ func init() {
   rootCmd.AddCommand(batchCmd)
   rootCmd.AddCommand(profileCmd)
   rootCmd.AddCommand(sessionsCmd)
+  rootCmd.AddCommand(importCmd)
+  rootCmd.AddCommand(exportCmd)
 }
