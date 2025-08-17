@@ -20,10 +20,18 @@ type Server struct {
 	PassphraseProtected bool   `yaml:"passphrase_protected,omitempty" json:"passphrase_protected,omitempty"`
 }
 
+// Profile represents a profile configuration for organizing servers
+type Profile struct {
+	Name        string   `yaml:"name" json:"name"`
+	Description string   `yaml:"description,omitempty" json:"description,omitempty"`
+	Servers     []string `yaml:"servers" json:"servers"`
+}
+
 // Config represents the main configuration structure
 type Config struct {
-	Servers    []Server `yaml:"servers" json:"servers"`
-	configPath string   // internal field to track config file path
+	Servers    []Server  `yaml:"servers" json:"servers"`
+	Profiles   []Profile `yaml:"profiles,omitempty" json:"profiles,omitempty"`
+	configPath string    // internal field to track config file path
 }
 
 // DefaultConfigPath returns the default configuration file path
@@ -62,7 +70,7 @@ func LoadFromPath(configPath string) (*Config, error) {
 
 	// If file doesn't exist, return empty config
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return &Config{Servers: []Server{}, configPath: configPath}, nil
+		return &Config{Servers: []Server{}, Profiles: []Profile{}, configPath: configPath}, nil
 	}
 
 	// Read file
@@ -75,6 +83,11 @@ func LoadFromPath(configPath string) (*Config, error) {
 	var config Config
 	if err := yaml.Unmarshal(data, &config); err != nil {
 		return nil, fmt.Errorf("failed to parse config file: %w", err)
+	}
+
+	// Ensure backward compatibility: initialize Profiles if nil
+	if config.Profiles == nil {
+		config.Profiles = []Profile{}
 	}
 
 	config.configPath = configPath
@@ -209,4 +222,149 @@ func ExpandPath(path string) (string, error) {
 	}
 
 	return path, nil
+}
+
+// Profile validation and management methods
+
+// Validate validates a profile configuration
+func (p *Profile) Validate() error {
+	if strings.TrimSpace(p.Name) == "" {
+		return fmt.Errorf("profile name is required")
+	}
+	return nil
+}
+
+// AddProfile adds a new profile to the configuration
+func (c *Config) AddProfile(profile Profile) error {
+	// Validate profile configuration
+	if err := profile.Validate(); err != nil {
+		return fmt.Errorf("invalid profile configuration: %w", err)
+	}
+
+	// Check for duplicate names
+	for _, existing := range c.Profiles {
+		if existing.Name == profile.Name {
+			return fmt.Errorf("profile with name '%s' already exists", profile.Name)
+		}
+	}
+
+	// Initialize servers slice if nil
+	if profile.Servers == nil {
+		profile.Servers = []string{}
+	}
+
+	c.Profiles = append(c.Profiles, profile)
+	return nil
+}
+
+// RemoveProfile removes a profile from the configuration by name
+func (c *Config) RemoveProfile(name string) error {
+	for i, profile := range c.Profiles {
+		if profile.Name == name {
+			// Remove profile from slice
+			c.Profiles = append(c.Profiles[:i], c.Profiles[i+1:]...)
+			return nil
+		}
+	}
+	return fmt.Errorf("profile '%s' not found", name)
+}
+
+// GetProfile retrieves a profile by name
+func (c *Config) GetProfile(name string) (*Profile, error) {
+	for i := range c.Profiles {
+		if c.Profiles[i].Name == name {
+			return &c.Profiles[i], nil
+		}
+	}
+	return nil, fmt.Errorf("profile '%s' not found", name)
+}
+
+// GetProfiles returns all profiles
+func (c *Config) GetProfiles() []Profile {
+	return c.Profiles
+}
+
+// GetServersByProfile retrieves all servers belonging to a specific profile
+func (c *Config) GetServersByProfile(profileName string) ([]Server, error) {
+	profile, err := c.GetProfile(profileName)
+	if err != nil {
+		return nil, err
+	}
+
+	var servers []Server
+	for _, serverName := range profile.Servers {
+		// Find the server in the config
+		for _, server := range c.Servers {
+			if server.Name == serverName {
+				servers = append(servers, server)
+				break
+			}
+		}
+		// Note: We skip servers that don't exist rather than returning an error
+		// This allows for more flexible configuration management
+	}
+
+	return servers, nil
+}
+
+// AssignServerToProfile assigns a server to a profile
+func (c *Config) AssignServerToProfile(serverName, profileName string) error {
+	// Verify server exists
+	if _, err := c.GetServer(serverName); err != nil {
+		return fmt.Errorf("server '%s' not found", serverName)
+	}
+
+	// Get profile (this will error if profile doesn't exist)
+	profile, err := c.GetProfile(profileName)
+	if err != nil {
+		return err
+	}
+
+	// Check if server is already assigned to this profile
+	for _, assignedServer := range profile.Servers {
+		if assignedServer == serverName {
+			return nil // Server already assigned, no error
+		}
+	}
+
+	// Add server to profile
+	profile.Servers = append(profile.Servers, serverName)
+
+	// Update the profile in the config
+	for i := range c.Profiles {
+		if c.Profiles[i].Name == profileName {
+			c.Profiles[i] = *profile
+			break
+		}
+	}
+
+	return nil
+}
+
+// UnassignServerFromProfile removes a server from a profile
+func (c *Config) UnassignServerFromProfile(serverName, profileName string) error {
+	// Get profile (this will error if profile doesn't exist)
+	profile, err := c.GetProfile(profileName)
+	if err != nil {
+		return err
+	}
+
+	// Find and remove server from profile
+	for i, assignedServer := range profile.Servers {
+		if assignedServer == serverName {
+			// Remove server from slice
+			profile.Servers = append(profile.Servers[:i], profile.Servers[i+1:]...)
+			
+			// Update the profile in the config
+			for j := range c.Profiles {
+				if c.Profiles[j].Name == profileName {
+					c.Profiles[j] = *profile
+					break
+				}
+			}
+			return nil
+		}
+	}
+
+	return fmt.Errorf("server '%s' is not assigned to profile '%s'", serverName, profileName)
 }
