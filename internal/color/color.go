@@ -144,6 +144,25 @@ func FormatHelp(helpText string) string {
 			continue
 		}
 		
+		// Format Available Commands section entries (lines with command names and descriptions)
+		if strings.HasPrefix(line, "  ") && !strings.Contains(line, "sshm") && strings.Contains(line, "    ") {
+			// This looks like "  commandname    description"
+			trimmed := strings.TrimLeft(line, " ")
+			parts := strings.SplitN(trimmed, " ", 2)
+			if len(parts) >= 2 {
+				commandName := parts[0]
+				description := parts[1]
+				// Find how much spacing there was originally between command and description
+				spacingIndex := strings.Index(line, description)
+				if spacingIndex > 0 {
+					originalSpacing := line[strings.Index(line, commandName)+len(commandName):spacingIndex]
+					coloredCommand := "  " + Command(commandName) + originalSpacing + description
+					formattedLines = append(formattedLines, coloredCommand)
+					continue
+				}
+			}
+		}
+		
 		// Format CLI flags (lines containing --)
 		if strings.Contains(line, "--") {
 			// Replace flag patterns with colored versions
