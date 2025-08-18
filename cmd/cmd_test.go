@@ -11,6 +11,7 @@ import (
   "testing"
 
   "github.com/spf13/cobra"
+  "sshm/internal/config"
   "sshm/internal/tmux"
 )
 
@@ -76,6 +77,18 @@ func TestAddCommand(t *testing.T) {
       args:        []string{},
       expectError: true,
       contains:    "accepts 1 arg(s), received 0",
+    },
+    {
+      name:        "empty server name",
+      args:        []string{""},
+      expectError: true,
+      contains:    "Server name cannot be empty",
+    },
+    {
+      name:        "whitespace-only server name",
+      args:        []string{"   "},
+      expectError: true,
+      contains:    "Server name cannot be empty",
     },
     {
       name: "invalid port",
@@ -495,6 +508,27 @@ func TestProfileCreateCommand(t *testing.T) {
       contains:    "Profile 'testing' created successfully",
     },
     {
+      name: "profile creation with --description flag",
+      args: []string{"production", "--description", "Production servers"},
+      setupFn:     func(configDir string) { setupTestServers(configDir) },
+      expectError: false,
+      contains:    "Profile 'production' created successfully",
+    },
+    {
+      name: "profile creation with -d short flag",
+      args: []string{"dev", "-d", "Development environment"},
+      setupFn:     func(configDir string) { setupTestServers(configDir) },
+      expectError: false,
+      contains:    "Profile 'dev' created successfully",
+    },
+    {
+      name: "profile creation with empty --description flag",
+      args: []string{"empty-desc", "--description", ""},
+      setupFn:     func(configDir string) { setupTestServers(configDir) },
+      expectError: false,
+      contains:    "Profile 'empty-desc' created successfully",
+    },
+    {
       name:        "missing profile name",
       args:        []string{},
       expectError: true,
@@ -549,6 +583,41 @@ func TestProfileCreateCommand(t *testing.T) {
       }
     })
   }
+}
+
+func TestProfileCreateWithDescriptionFlag(t *testing.T) {
+	// Test that the description flag actually saves the correct description
+	tmpDir := setupTestConfig(t)
+	defer os.RemoveAll(tmpDir)
+
+	// Create profile with description flag
+	testRootCmd := &cobra.Command{Use: "sshm"}
+	testRootCmd.AddCommand(profileCmd)
+
+	var output bytes.Buffer
+	testRootCmd.SetOut(&output)
+	testRootCmd.SetErr(&output)
+
+	testRootCmd.SetArgs([]string{"profile", "create", "test-desc", "--description", "Test Description"})
+	err := testRootCmd.Execute()
+	if err != nil {
+		t.Fatalf("Unexpected error: %v", err)
+	}
+
+	// Load config and verify description was saved
+	cfg, err := config.Load()
+	if err != nil {
+		t.Fatalf("Failed to load config: %v", err)
+	}
+
+	profile, err := cfg.GetProfile("test-desc")
+	if err != nil {
+		t.Fatalf("Failed to get created profile: %v", err)
+	}
+
+	if profile.Description != "Test Description" {
+		t.Errorf("Expected description 'Test Description', got '%s'", profile.Description)
+	}
 }
 
 func TestProfileListCommand(t *testing.T) {

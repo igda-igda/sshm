@@ -32,12 +32,14 @@ var profileCreateCmd = &cobra.Command{
 	Short: "Create a new profile",
 	Long: `Create a new profile with the specified name.
 	
-You will be prompted to enter an optional description for the profile.
+You can either provide a description using the --description flag or you will be 
+prompted to enter an optional description for the profile interactively.
 Once created, you can assign servers to this profile using the assign command.
 
 Examples:
   sshm profile create development
-  sshm profile create production`,
+  sshm profile create production --description "Production environment servers"
+  sshm profile create staging -d "Staging servers for testing"`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		profileName := args[0]
@@ -48,14 +50,20 @@ Examples:
 			return fmt.Errorf("failed to load configuration: %w", err)
 		}
 
-		// Prompt for description
-		reader := bufio.NewReader(os.Stdin)
-		fmt.Printf("Enter description for profile '%s' (optional): ", profileName)
-		description, err := reader.ReadString('\n')
-		if err != nil {
-			return fmt.Errorf("failed to read description: %w", err)
+		// Get description from flag or prompt interactively
+		var description string
+		if cmd.Flags().Changed("description") {
+			description, _ = cmd.Flags().GetString("description")
+		} else {
+			// Prompt for description interactively
+			reader := bufio.NewReader(os.Stdin)
+			fmt.Printf("Enter description for profile '%s' (optional): ", profileName)
+			desc, err := reader.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("failed to read description: %w", err)
+			}
+			description = strings.TrimSpace(desc)
 		}
-		description = strings.TrimSpace(description)
 
 		// Create profile
 		profile := config.Profile{
@@ -264,4 +272,7 @@ func init() {
 	profileCmd.AddCommand(profileDeleteCmd)
 	profileCmd.AddCommand(profileAssignCmd)
 	profileCmd.AddCommand(profileUnassignCmd)
+
+	// Add flags for profile create command
+	profileCreateCmd.Flags().StringP("description", "d", "", "Description for the profile")
 }

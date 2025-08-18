@@ -38,7 +38,12 @@ Examples:
 }
 
 func runAddCommand(args []string, output io.Writer) error {
-  serverName := args[0]
+  serverName := strings.TrimSpace(args[0])
+  
+  // Validate server name
+  if serverName == "" {
+    return fmt.Errorf("❌ Server name cannot be empty")
+  }
   
   // Load existing configuration
   cfg, err := config.Load()
