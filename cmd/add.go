@@ -15,29 +15,37 @@ import (
 var addCmd = &cobra.Command{
   Use:   "add <server-name>",
   Short: "Add a new server configuration",
-  Long: `Add a new server configuration with interactive prompts for connection details.
+  Long: `Add a new server configuration with CLI flags or interactive prompts.
 
-This command will prompt you for:
-  • Hostname/IP address of the server
-  • SSH port (default: 22)
-  • Username for authentication
-  • Authentication method (SSH key or password)
-  • SSH key path (if using key authentication)
-  • Passphrase protection status (for SSH keys)
+You can provide all connection details using flags for non-interactive usage,
+or use interactive mode by omitting flags (you will be prompted for details).
+
+CLI Flags:
+  • --hostname: Hostname/IP address of the server (required for non-interactive)
+  • --port: SSH port (default: 22)
+  • --username: Username for authentication (required for non-interactive)
+  • --auth-type: Authentication method - 'key' or 'password' (required for non-interactive)
+  • --key-path: Path to SSH key file (required if auth-type is 'key')
+  • --passphrase-protected: Whether the SSH key is passphrase protected (default: false)
 
 The server configuration will be stored securely in ~/.sshm/config.yaml
   
 Examples:
-  sshm add production-api        # Add production API server
-  sshm add staging-db           # Add staging database server
-  sshm add jump-host            # Add bastion/jump host`,
+  # Interactive mode
+  sshm add production-api
+  
+  # Non-interactive with key authentication
+  sshm add web-server --hostname web.example.com --username webuser --auth-type key --key-path ~/.ssh/web_key
+  
+  # Non-interactive with password authentication  
+  sshm add db-server --hostname db.example.com --username dbuser --auth-type password --port 3306`,
   Args: cobra.ExactArgs(1),
   RunE: func(cmd *cobra.Command, args []string) error {
-    return runAddCommand(args, cmd.OutOrStdout())
+    return runAddCommand(cmd, args, cmd.OutOrStdout())
   },
 }
 
-func runAddCommand(args []string, output io.Writer) error {
+func runAddCommand(cmd *cobra.Command, args []string, output io.Writer) error {
   serverName := strings.TrimSpace(args[0])
   
   // Validate server name
@@ -56,53 +64,118 @@ func runAddCommand(args []string, output io.Writer) error {
     return fmt.Errorf("❌ Server '%s' already exists. Use 'sshm remove %s' to remove it first", serverName, serverName)
   }
 
-  // Interactive prompts for server configuration
-  scanner := bufio.NewScanner(os.Stdin)
+  // Check if we're using CLI flags or interactive mode
+  usingFlags := cmd.Flags().Changed("hostname") || cmd.Flags().Changed("username") || cmd.Flags().Changed("auth-type")
   
-  fmt.Fprintf(output, "Adding server '%s'\n\n", serverName)
-  
-  // Hostname
-  fmt.Fprint(output, "Hostname: ")
-  if !scanner.Scan() {
-    return fmt.Errorf("failed to read hostname")
-  }
-  hostname := strings.TrimSpace(scanner.Text())
-  if hostname == "" {
-    return fmt.Errorf("❌ Hostname is required")
-  }
+  var hostname, username, authType, keyPath string
+  var port int
+  var passphraseProtected bool
 
-  // Port
-  fmt.Fprint(output, "Port (default: 22): ")
-  if !scanner.Scan() {
-    return fmt.Errorf("failed to read port")
-  }
-  portStr := strings.TrimSpace(scanner.Text())
-  if portStr == "" {
-    portStr = "22"
-  }
-  port, err := strconv.Atoi(portStr)
-  if err != nil || port <= 0 || port > 65535 {
-    return fmt.Errorf("❌ Invalid port: %s. Port must be between 1 and 65535", portStr)
-  }
+  if usingFlags {
+    // CLI flag mode - validate all required flags are provided
+    if !cmd.Flags().Changed("hostname") {
+      return fmt.Errorf("❌ --hostname is required for non-interactive mode")
+    }
+    if !cmd.Flags().Changed("username") {
+      return fmt.Errorf("❌ --username is required for non-interactive mode")
+    }
+    if !cmd.Flags().Changed("auth-type") {
+      return fmt.Errorf("❌ --auth-type is required for non-interactive mode")
+    }
 
-  // Username
-  fmt.Fprint(output, "Username: ")
-  if !scanner.Scan() {
-    return fmt.Errorf("failed to read username")
-  }
-  username := strings.TrimSpace(scanner.Text())
-  if username == "" {
-    return fmt.Errorf("❌ Username is required")
-  }
+    // Get flag values
+    hostname, _ = cmd.Flags().GetString("hostname")
+    username, _ = cmd.Flags().GetString("username")
+    authType, _ = cmd.Flags().GetString("auth-type")
+    port, _ = cmd.Flags().GetInt("port")
+    keyPath, _ = cmd.Flags().GetString("key-path")
+    passphraseProtected, _ = cmd.Flags().GetBool("passphrase-protected")
 
-  // Authentication type
-  fmt.Fprint(output, "Authentication type (key/password): ")
-  if !scanner.Scan() {
-    return fmt.Errorf("failed to read auth type")
-  }
-  authType := strings.TrimSpace(strings.ToLower(scanner.Text()))
-  if authType != "key" && authType != "password" {
-    return fmt.Errorf("❌ Authentication type must be 'key' or 'password', got: %s", authType)
+    // Validate flag values
+    if hostname == "" {
+      return fmt.Errorf("❌ Hostname cannot be empty")
+    }
+    if username == "" {
+      return fmt.Errorf("❌ Username cannot be empty")
+    }
+    if authType != "key" && authType != "password" {
+      return fmt.Errorf("❌ Authentication type must be 'key' or 'password', got: %s", authType)
+    }
+    if authType == "key" && keyPath == "" {
+      return fmt.Errorf("❌ --key-path is required when auth-type is 'key'")
+    }
+    if port <= 0 || port > 65535 {
+      return fmt.Errorf("❌ Invalid port: %d. Port must be between 1 and 65535", port)
+    }
+
+  } else {
+    // Interactive mode (existing logic)
+    scanner := bufio.NewScanner(os.Stdin)
+    
+    fmt.Fprintf(output, "Adding server '%s'\n\n", serverName)
+    
+    // Hostname
+    fmt.Fprint(output, "Hostname: ")
+    if !scanner.Scan() {
+      return fmt.Errorf("failed to read hostname")
+    }
+    hostname = strings.TrimSpace(scanner.Text())
+    if hostname == "" {
+      return fmt.Errorf("❌ Hostname is required")
+    }
+
+    // Port
+    fmt.Fprint(output, "Port (default: 22): ")
+    if !scanner.Scan() {
+      return fmt.Errorf("failed to read port")
+    }
+    portStr := strings.TrimSpace(scanner.Text())
+    if portStr == "" {
+      portStr = "22"
+    }
+    port, err = strconv.Atoi(portStr)
+    if err != nil || port <= 0 || port > 65535 {
+      return fmt.Errorf("❌ Invalid port: %s. Port must be between 1 and 65535", portStr)
+    }
+
+    // Username
+    fmt.Fprint(output, "Username: ")
+    if !scanner.Scan() {
+      return fmt.Errorf("failed to read username")
+    }
+    username = strings.TrimSpace(scanner.Text())
+    if username == "" {
+      return fmt.Errorf("❌ Username is required")
+    }
+
+    // Authentication type
+    fmt.Fprint(output, "Authentication type (key/password): ")
+    if !scanner.Scan() {
+      return fmt.Errorf("failed to read auth type")
+    }
+    authType = strings.TrimSpace(strings.ToLower(scanner.Text()))
+    if authType != "key" && authType != "password" {
+      return fmt.Errorf("❌ Authentication type must be 'key' or 'password', got: %s", authType)
+    }
+
+    // Additional prompts for key authentication
+    if authType == "key" {
+      fmt.Fprint(output, "SSH key path: ")
+      if !scanner.Scan() {
+        return fmt.Errorf("failed to read key path")
+      }
+      keyPath = strings.TrimSpace(scanner.Text())
+      if keyPath == "" {
+        return fmt.Errorf("❌ SSH key path is required for key authentication")
+      }
+
+      fmt.Fprint(output, "Is the key passphrase protected? (y/n): ")
+      if !scanner.Scan() {
+        return fmt.Errorf("failed to read passphrase protection")
+      }
+      passphraseResp := strings.TrimSpace(strings.ToLower(scanner.Text()))
+      passphraseProtected = passphraseResp == "y" || passphraseResp == "yes"
+    }
   }
 
   // Create server configuration
@@ -114,24 +187,10 @@ func runAddCommand(args []string, output io.Writer) error {
     AuthType: authType,
   }
 
-  // Additional prompts for key authentication
+  // Set optional fields for key authentication
   if authType == "key" {
-    fmt.Fprint(output, "SSH key path: ")
-    if !scanner.Scan() {
-      return fmt.Errorf("failed to read key path")
-    }
-    keyPath := strings.TrimSpace(scanner.Text())
-    if keyPath == "" {
-      return fmt.Errorf("❌ SSH key path is required for key authentication")
-    }
     server.KeyPath = keyPath
-
-    fmt.Fprint(output, "Is the key passphrase protected? (y/n): ")
-    if !scanner.Scan() {
-      return fmt.Errorf("failed to read passphrase protection")
-    }
-    passphraseResp := strings.TrimSpace(strings.ToLower(scanner.Text()))
-    server.PassphraseProtected = passphraseResp == "y" || passphraseResp == "yes"
+    server.PassphraseProtected = passphraseProtected
   }
 
   // Validate the server configuration
@@ -152,4 +211,14 @@ func runAddCommand(args []string, output io.Writer) error {
   fmt.Fprintf(output, "\n✅ Server '%s' added successfully!\n", serverName)
   fmt.Fprintf(output, "💡 Use 'sshm connect %s' to connect to this server\n", serverName)
   return nil
+}
+
+func init() {
+  // Add CLI flags for non-interactive usage
+  addCmd.Flags().StringP("hostname", "H", "", "Hostname/IP address of the server (required for non-interactive)")
+  addCmd.Flags().IntP("port", "p", 22, "SSH port (default: 22)")
+  addCmd.Flags().StringP("username", "u", "", "Username for authentication (required for non-interactive)")
+  addCmd.Flags().StringP("auth-type", "a", "", "Authentication method - 'key' or 'password' (required for non-interactive)")
+  addCmd.Flags().StringP("key-path", "k", "", "Path to SSH key file (required if auth-type is 'key')")
+  addCmd.Flags().BoolP("passphrase-protected", "P", false, "Whether the SSH key is passphrase protected (default: false)")
 }

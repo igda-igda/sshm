@@ -288,7 +288,7 @@ func (m *Manager) buildSSHCommand(server Server) (string, error) {
 
 // CreateWindow creates a new window in an existing tmux session
 func (m *Manager) CreateWindow(sessionName, windowName string) error {
-	cmd := execCommand("tmux", "new-window", "-t", sessionName, "-n", windowName)
+	cmd := execCommand("tmux", "new-window", "-t", sessionName, "-n", windowName, "-a")
 	err := cmd.Run()
 	if err != nil {
 		return fmt.Errorf("failed to create window '%s' in session '%s': %w", windowName, sessionName, err)

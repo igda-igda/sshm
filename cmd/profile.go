@@ -135,11 +135,12 @@ var profileDeleteCmd = &cobra.Command{
 This will remove the profile from the configuration but will not delete the servers
 that were assigned to it. The servers will remain in the configuration.
 
-You will be prompted to confirm the deletion.
+By default, you will be prompted to confirm the deletion. Use --yes to skip confirmation.
 
 Examples:
-  sshm profile delete staging
-  sshm profile delete old-environment`,
+  sshm profile delete staging              # Interactive confirmation
+  sshm profile delete old-environment --yes  # Non-interactive deletion
+  sshm profile delete prod -y             # Short flag version`,
 	Args: cobra.ExactArgs(1),
 	RunE: func(cmd *cobra.Command, args []string) error {
 		profileName := args[0]
@@ -156,24 +157,29 @@ Examples:
 			return fmt.Errorf("profile '%s' not found", profileName)
 		}
 
-		// Show profile details and ask for confirmation
-		fmt.Printf("Profile: %s\n", profile.Name)
-		if profile.Description != "" {
-			fmt.Printf("Description: %s\n", profile.Description)
-		}
-		fmt.Printf("Assigned servers: %d\n", len(profile.Servers))
-		fmt.Printf("Are you sure you want to delete this profile? (y/N): ")
+		// Check if --yes flag is provided for non-interactive mode
+		skipConfirmation, _ := cmd.Flags().GetBool("yes")
+		
+		if !skipConfirmation {
+			// Show profile details and ask for confirmation
+			fmt.Printf("Profile: %s\n", profile.Name)
+			if profile.Description != "" {
+				fmt.Printf("Description: %s\n", profile.Description)
+			}
+			fmt.Printf("Assigned servers: %d\n", len(profile.Servers))
+			fmt.Printf("Are you sure you want to delete this profile? (y/N): ")
 
-		reader := bufio.NewReader(os.Stdin)
-		response, err := reader.ReadString('\n')
-		if err != nil {
-			return fmt.Errorf("failed to read response: %w", err)
-		}
+			reader := bufio.NewReader(os.Stdin)
+			response, err := reader.ReadString('\n')
+			if err != nil {
+				return fmt.Errorf("failed to read response: %w", err)
+			}
 
-		response = strings.ToLower(strings.TrimSpace(response))
-		if response != "y" && response != "yes" {
-			cmd.Println("Deletion cancelled")
-			return nil
+			response = strings.ToLower(strings.TrimSpace(response))
+			if response != "y" && response != "yes" {
+				cmd.Println("Deletion cancelled")
+				return nil
+			}
 		}
 
 		// Remove profile
@@ -275,4 +281,7 @@ func init() {
 
 	// Add flags for profile create command
 	profileCreateCmd.Flags().StringP("description", "d", "", "Description for the profile")
+	
+	// Add flags for profile delete command
+	profileDeleteCmd.Flags().BoolP("yes", "y", false, "Skip confirmation prompt and delete profile")
 }
