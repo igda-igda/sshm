@@ -382,9 +382,6 @@ sshm/
 │   ├── docker-compose.test.yml
 │   ├── ssh-server/           # Test SSH server configurations
 │   └── integration/          # Integration test scenarios
-├── .agent-os/                # Agent OS workflow documentation
-│   ├── product/              # Product specifications and roadmap
-│   └── specs/                # Feature specifications and tasks
 ├── integration_test.go       # End-to-end integration tests
 ├── go.mod                    # Go module dependencies
 ├── go.sum                    # Dependency checksums
