@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/spf13/cobra"
+	"sshm/internal/color"
 	"sshm/internal/config"
 	"sshm/internal/tmux"
 )
@@ -75,7 +76,7 @@ func runBatchCommand(profileName string, output io.Writer) error {
 		return fmt.Errorf("❌ tmux is not available on this system. Please install tmux to use sshm")
 	}
 
-	fmt.Fprintf(output, "🔌 Creating group session for profile '%s' with %d server(s)...\n", profileName, len(servers))
+	fmt.Fprintf(output, "%s\n", color.InfoMessage("Creating group session for profile '%s' with %d server(s)...", profileName, len(servers)))
 
 	// Convert config.Server slice to tmux.Server interface slice
 	tmuxServers := make([]tmux.Server, len(servers))
@@ -90,11 +91,11 @@ func runBatchCommand(profileName string, output io.Writer) error {
 	}
 
 	if wasExisting {
-		fmt.Fprintf(output, "🔄 Found existing group session: %s\n", sessionName)
-		fmt.Fprintf(output, "♻️  Reattaching to existing session\n")
+		fmt.Fprintf(output, "%s\n", color.InfoMessage("Found existing group session: %s", sessionName))
+		fmt.Fprintf(output, "%s\n", color.InfoMessage("Reattaching to existing session"))
 	} else {
-		fmt.Fprintf(output, "📺 Created group session: %s\n", sessionName)
-		fmt.Fprintf(output, "⚡ Created %d windows for servers\n", len(servers))
+		fmt.Fprintf(output, "%s\n", color.InfoMessage("Created group session: %s", sessionName))
+		fmt.Fprintf(output, "%s\n", color.InfoMessage("Created %d windows for servers", len(servers)))
 		
 		// List the windows created
 		for i, server := range servers {
@@ -104,22 +105,22 @@ func runBatchCommand(profileName string, output io.Writer) error {
 	}
 
 	// Attach to the session
-	fmt.Fprintf(output, "🔗 Attaching to group session...\n")
+	fmt.Fprintf(output, "%s\n", color.InfoMessage("Attaching to group session..."))
 	err = tmuxManager.AttachSession(sessionName)
 	if err != nil {
 		// Don't fail the entire command if attach fails - provide manual instructions
-		fmt.Fprintf(output, "⚠️  Automatic attach failed (this can happen in non-TTY environments)\n")
-		fmt.Fprintf(output, "💡 To manually attach to your group session, run:\n")
+		fmt.Fprintf(output, "%s\n", color.WarningMessage("Automatic attach failed (this can happen in non-TTY environments)"))
+		fmt.Fprintf(output, "%s\n", color.InfoText("To manually attach to your group session, run:"))
 		fmt.Fprintf(output, "   tmux attach-session -t %s\n", sessionName)
-		fmt.Fprintf(output, "💡 To switch between windows, use:\n")
+		fmt.Fprintf(output, "%s\n", color.InfoText("To switch between windows, use:"))
 		fmt.Fprintf(output, "   Ctrl+b, then number key (1, 2, 3, etc.)\n")
 		fmt.Fprintf(output, "   Ctrl+b, then 'n' for next window\n")
 		fmt.Fprintf(output, "   Ctrl+b, then 'p' for previous window\n")
-		fmt.Fprintf(output, "✅ Group session %s is ready!\n", sessionName)
+		fmt.Fprintf(output, "%s\n", color.SuccessMessage("Group session %s is ready!", sessionName))
 		return nil
 	}
 
-	fmt.Fprintf(output, "✅ Connected to profile '%s' group session successfully!\n", profileName)
+	fmt.Fprintf(output, "%s\n", color.SuccessMessage("Connected to profile '%s' group session successfully!", profileName))
 	return nil
 }
 

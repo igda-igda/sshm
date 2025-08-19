@@ -5,6 +5,7 @@ import (
   "io"
 
   "github.com/spf13/cobra"
+  "sshm/internal/color"
   "sshm/internal/config"
   "sshm/internal/tmux"
 )
@@ -65,8 +66,8 @@ func runConnectCommand(args []string, output io.Writer) error {
     return fmt.Errorf("❌ Failed to build SSH command: %w", err)
   }
 
-  fmt.Fprintf(output, "🔌 Connecting to %s (%s@%s:%d)...\n", 
-    server.Name, server.Username, server.Hostname, server.Port)
+  fmt.Fprintf(output, "%s\n", color.InfoMessage("Connecting to %s (%s@%s:%d)...", 
+    server.Name, server.Username, server.Hostname, server.Port))
 
   // Create tmux session and connect (or reattach to existing)
   sessionName, wasExisting, err := tmuxManager.ConnectToServer(server.Name, sshCommand)
@@ -75,26 +76,26 @@ func runConnectCommand(args []string, output io.Writer) error {
   }
 
   if wasExisting {
-    fmt.Fprintf(output, "🔄 Found existing tmux session: %s\n", sessionName)
-    fmt.Fprintf(output, "♻️  Reattaching to existing session\n")
+    fmt.Fprintf(output, "%s\n", color.InfoMessage("Found existing tmux session: %s", sessionName))
+    fmt.Fprintf(output, "%s\n", color.InfoMessage("Reattaching to existing session"))
   } else {
-    fmt.Fprintf(output, "📺 Created tmux session: %s\n", sessionName)
-    fmt.Fprintf(output, "⚡ SSH command sent to session\n")
+    fmt.Fprintf(output, "%s\n", color.InfoMessage("Created tmux session: %s", sessionName))
+    fmt.Fprintf(output, "%s\n", color.InfoMessage("SSH command sent to session"))
   }
 
   // Attach to the session
-  fmt.Fprintf(output, "🔗 Attaching to session...\n")
+  fmt.Fprintf(output, "%s\n", color.InfoMessage("Attaching to session..."))
   err = tmuxManager.AttachSession(sessionName)
   if err != nil {
     // Don't fail the entire command if attach fails - provide manual instructions
-    fmt.Fprintf(output, "⚠️  Automatic attach failed (this can happen in non-TTY environments)\n")
-    fmt.Fprintf(output, "💡 To manually attach to your session, run:\n")
+    fmt.Fprintf(output, "%s\n", color.WarningMessage("Automatic attach failed (this can happen in non-TTY environments)"))
+    fmt.Fprintf(output, "%s\n", color.InfoText("To manually attach to your session, run:"))
     fmt.Fprintf(output, "   tmux attach-session -t %s\n", sessionName)
-    fmt.Fprintf(output, "✅ Session %s is ready for connection!\n", sessionName)
+    fmt.Fprintf(output, "%s\n", color.SuccessMessage("Session %s is ready for connection!", sessionName))
     return nil
   }
 
-  fmt.Fprintf(output, "✅ Connected to %s successfully!\n", server.Name)
+  fmt.Fprintf(output, "%s\n", color.SuccessMessage("Connected to %s successfully!", server.Name))
   return nil
 }
 

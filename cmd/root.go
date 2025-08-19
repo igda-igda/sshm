@@ -6,6 +6,7 @@ import (
   "os"
 
   "github.com/spf13/cobra"
+  "sshm/internal/color"
 )
 
 var rootCmd = &cobra.Command{
@@ -89,6 +90,22 @@ Examples:
   cmd.AddCommand(importCmd)
   cmd.AddCommand(exportCmd)
   
+  // Set custom help template with color formatting
+  cmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+    // Create comprehensive help text including Long description
+    helpText := ""
+    if len(cmd.Long) > 0 {
+      helpText += cmd.Long + "\n\n"
+    }
+    helpText += cmd.UsageString()
+    
+    coloredHelp := color.FormatHelp(helpText)
+    fmt.Fprint(cmd.OutOrStdout(), coloredHelp)
+  })
+  
+  // Apply color formatting to all individual commands for testing
+  applyColorFormattingToAllCommands()
+  
   return cmd
 }
 
@@ -102,4 +119,20 @@ func init() {
   rootCmd.AddCommand(sessionsCmd)
   rootCmd.AddCommand(importCmd)
   rootCmd.AddCommand(exportCmd)
+  
+  // Set custom help template with color formatting for root command
+  rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+    // Create comprehensive help text including Long description
+    helpText := ""
+    if len(cmd.Long) > 0 {
+      helpText += cmd.Long + "\n\n"
+    }
+    helpText += cmd.UsageString()
+    
+    coloredHelp := color.FormatHelp(helpText)
+    fmt.Fprint(cmd.OutOrStdout(), coloredHelp)
+  })
+  
+  // Apply color formatting to all individual commands AFTER they're all added
+  applyColorFormattingToAllCommands()
 }
