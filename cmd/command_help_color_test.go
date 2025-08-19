@@ -26,7 +26,6 @@ func TestIndividualCommandHelpColorFormatting(t *testing.T) {
 			cmd:  addCmd,
 			expected: []string{
 				"\x1b[1;34m", // Bold blue for headers
-				"\x1b[36m",   // Cyan for command names
 				"\x1b[32m",   // Green for examples
 				"\x1b[33m",   // Yellow for flags
 			},

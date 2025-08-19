@@ -9,6 +9,7 @@ import (
   "strings"
 
   "github.com/spf13/cobra"
+  "sshm/internal/color"
   "sshm/internal/config"
 )
 
@@ -221,4 +222,17 @@ func init() {
   addCmd.Flags().StringP("auth-type", "a", "", "Authentication method - 'key' or 'password' (required for non-interactive)")
   addCmd.Flags().StringP("key-path", "k", "", "Path to SSH key file (required if auth-type is 'key')")
   addCmd.Flags().BoolP("passphrase-protected", "P", false, "Whether the SSH key is passphrase protected (default: false)")
+  
+  // Set color help function directly on this command
+  addCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
+    // Create comprehensive help text including Long description
+    helpText := ""
+    if len(cmd.Long) > 0 {
+      helpText += cmd.Long + "\n\n"
+    }
+    helpText += cmd.UsageString()
+    
+    coloredHelp := color.FormatHelp(helpText)
+    fmt.Fprint(cmd.OutOrStdout(), coloredHelp)
+  })
 }

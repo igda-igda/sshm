@@ -23,25 +23,21 @@ func setColorHelpFunc(cmd *cobra.Command) {
 }
 
 // applyColorFormattingToAllCommands applies color help formatting to all commands
+// This should be called after all commands are initialized
 func applyColorFormattingToAllCommands() {
-	commands := []*cobra.Command{
-		addCmd,
-		connectCmd,
-		listCmd,
-		removeCmd,
-		batchCmd,
-		profileCmd,
-		sessionsCmd,
-		importCmd,
-		exportCmd,
-	}
-
-	for _, cmd := range commands {
+	// Get commands directly from the rootCmd to ensure they're initialized
+	for _, cmd := range rootCmd.Commands() {
 		setColorHelpFunc(cmd)
 		
-		// Also apply to any subcommands
-		for _, subCmd := range cmd.Commands() {
-			setColorHelpFunc(subCmd)
-		}
+		// Also apply to any subcommands recursively
+		applyColorFormattingRecursively(cmd)
+	}
+}
+
+// applyColorFormattingRecursively applies color formatting to a command and all its subcommands
+func applyColorFormattingRecursively(cmd *cobra.Command) {
+	for _, subCmd := range cmd.Commands() {
+		setColorHelpFunc(subCmd)
+		applyColorFormattingRecursively(subCmd)
 	}
 }
