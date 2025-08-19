@@ -6,11 +6,14 @@ import (
 	"strings"
 
 	"github.com/fatih/color"
+	"golang.org/x/term"
 )
 
 var (
 	// Color output control
 	colorOutput = true
+	// Force color override for testing (when true, bypasses terminal detection)
+	forceColorOverride = false
 	
 	// Color functions for different text types
 	headerColor    = color.New(color.Bold, color.FgBlue)
@@ -26,21 +29,79 @@ var (
 )
 
 func init() {
-	// Check for NO_COLOR environment variable
-	if os.Getenv("NO_COLOR") != "" {
-		SetColorOutput(false)
-	}
+	InitializeColorSupport()
 }
 
 // SetColorOutput enables or disables color output
+// When called explicitly (e.g., in tests), it overrides terminal detection
 func SetColorOutput(enabled bool) {
 	colorOutput = enabled
+	forceColorOverride = true
 	color.NoColor = !enabled
+}
+
+// InitializeColorSupport initializes color support based on environment
+func InitializeColorSupport() {
+	// Reset force override so we can detect properly
+	forceColorOverride = false
+	
+	// Start with default color support enabled
+	colorEnabled := true
+	
+	// Check for NO_COLOR environment variable (any value disables colors)
+	if os.Getenv("NO_COLOR") != "" {
+		colorEnabled = false
+	}
+	
+	// Check for dumb terminal
+	if os.Getenv("TERM") == "dumb" {
+		colorEnabled = false
+	}
+	
+	// Check if output is connected to a terminal
+	if !IsOutputTTY() {
+		colorEnabled = false
+	}
+	
+	// Set color output without forcing override
+	colorOutput = colorEnabled
+	color.NoColor = !colorEnabled
+}
+
+// IsOutputTTY returns true if stdout is connected to a terminal
+func IsOutputTTY() bool {
+	return term.IsTerminal(int(os.Stdout.Fd()))
+}
+
+// IsTerminalColorCapable returns true if terminal supports colors
+func IsTerminalColorCapable() bool {
+	// Check NO_COLOR first - this always disables colors
+	if os.Getenv("NO_COLOR") != "" {
+		return false
+	}
+	
+	// Check for dumb terminal
+	if os.Getenv("TERM") == "dumb" {
+		return false
+	}
+	
+	// Check if we're outputting to a terminal
+	if !IsOutputTTY() {
+		return false
+	}
+	
+	return true
 }
 
 // IsColorEnabled returns true if color output is enabled
 func IsColorEnabled() bool {
-	return colorOutput && !color.NoColor
+	// If color output was explicitly set (e.g., in tests), honor that
+	if forceColorOverride {
+		return colorOutput && !color.NoColor
+	}
+	
+	// Otherwise, use terminal capability detection
+	return colorOutput && !color.NoColor && IsTerminalColorCapable()
 }
 
 // Header formats text as a header (bold blue)

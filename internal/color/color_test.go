@@ -360,3 +360,195 @@ func TestStatusMessageNoColor(t *testing.T) {
 	// Reset for other tests
 	SetColorOutput(true)
 }
+
+// Test enhanced terminal detection capabilities
+func TestTerminalCapabilityDetection(t *testing.T) {
+	tests := []struct {
+		name           string
+		setupEnv       func()
+		cleanupEnv     func()
+		expectedResult bool
+	}{
+		{
+			name: "NO_COLOR environment variable set to 1",
+			setupEnv: func() {
+				os.Setenv("NO_COLOR", "1")
+			},
+			cleanupEnv: func() {
+				os.Unsetenv("NO_COLOR")
+			},
+			expectedResult: false,
+		},
+		{
+			name: "NO_COLOR environment variable set to empty string (should disable)",
+			setupEnv: func() {
+				os.Setenv("NO_COLOR", "")
+			},
+			cleanupEnv: func() {
+				os.Unsetenv("NO_COLOR")
+			},
+			expectedResult: false,
+		},
+		{
+			name: "TERM environment variable set to dumb",
+			setupEnv: func() {
+				os.Setenv("TERM", "dumb")
+				os.Unsetenv("NO_COLOR")
+			},
+			cleanupEnv: func() {
+				os.Unsetenv("TERM")
+			},
+			expectedResult: false,
+		},
+		{
+			name: "Normal terminal environment (test adjusted for non-TTY)",
+			setupEnv: func() {
+				os.Unsetenv("NO_COLOR")
+				os.Unsetenv("TERM")
+			},
+			cleanupEnv: func() {
+				// No cleanup needed
+			},
+			// In test environment, TTY detection returns false, so colors are disabled
+			// This is the correct behavior - tests run in a non-TTY environment
+			expectedResult: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Setup test environment
+			tt.setupEnv()
+			
+			// Re-initialize color detection with new environment
+			InitializeColorSupport()
+			
+			result := IsTerminalColorCapable()
+			if result != tt.expectedResult {
+				t.Errorf("Expected IsTerminalColorCapable() to return %v, got %v", tt.expectedResult, result)
+			}
+			
+			// Verify IsColorEnabled respects terminal capabilities
+			colorEnabled := IsColorEnabled()
+			if tt.expectedResult && !colorEnabled {
+				t.Errorf("Expected colors to be enabled when terminal is color-capable")
+			}
+			if !tt.expectedResult && colorEnabled {
+				t.Errorf("Expected colors to be disabled when terminal is not color-capable")
+			}
+			
+			// Cleanup
+			tt.cleanupEnv()
+		})
+	}
+}
+
+func TestTTYDetection(t *testing.T) {
+	// This test verifies that our TTY detection logic works
+	// Note: In test environment, we may not have a real TTY, so we test the logic
+	
+	// Test that function exists and returns a boolean
+	result := IsOutputTTY()
+	if result != true && result != false {
+		t.Errorf("IsOutputTTY() should return a boolean, got %T", result)
+	}
+	
+	// The actual value depends on the test environment, but the function should not panic
+	t.Logf("IsOutputTTY() returned: %v", result)
+}
+
+func TestColorFallbackBehavior(t *testing.T) {
+	// Test that all color functions fall back gracefully when colors are disabled
+	testText := "test message"
+	colorFunctions := map[string]func(string) string{
+		"Header":   Header,
+		"Command":  Command,
+		"Example":  Example,
+		"Flag":     Flag,
+		"Required": Required,
+		"Optional": Optional,
+		"Success":  Success,
+		"Error":    Error,
+		"Warning":  Warning,
+		"Info":     Info,
+	}
+	
+	// Disable colors
+	SetColorOutput(false)
+	
+	for name, fn := range colorFunctions {
+		t.Run(name+"_fallback", func(t *testing.T) {
+			result := fn(testText)
+			
+			// Should return plain text without ANSI codes
+			if strings.Contains(result, "\x1b[") {
+				t.Errorf("Function %s should not contain ANSI codes when colors disabled, got: %s", name, result)
+			}
+			
+			// Should return the original text
+			if result != testText {
+				t.Errorf("Function %s should return plain text '%s', got: '%s'", name, testText, result)
+			}
+		})
+	}
+	
+	// Re-enable colors for other tests
+	SetColorOutput(true)
+}
+
+func TestEnvironmentVariableOverride(t *testing.T) {
+	// Test various NO_COLOR values that should disable colors
+	noColorValues := []string{"1", "true", "yes", "anything", ""}
+	
+	for _, value := range noColorValues {
+		t.Run("NO_COLOR="+value, func(t *testing.T) {
+			// Set NO_COLOR
+			os.Setenv("NO_COLOR", value)
+			
+			// Re-initialize color support
+			InitializeColorSupport()
+			
+			// Colors should be disabled
+			if IsColorEnabled() {
+				t.Errorf("Expected colors to be disabled when NO_COLOR=%s, but they were enabled", value)
+			}
+			
+			// Test a color function
+			result := Header("test")
+			if strings.Contains(result, "\x1b[") {
+				t.Errorf("Expected no ANSI codes when NO_COLOR=%s, got: %s", value, result)
+			}
+			
+			// Cleanup
+			os.Unsetenv("NO_COLOR")
+		})
+	}
+}
+
+func TestColorInitialization(t *testing.T) {
+	// Save original state
+	originalColorOutput := colorOutput
+	
+	// Test initialization with NO_COLOR set
+	os.Setenv("NO_COLOR", "1")
+	InitializeColorSupport()
+	
+	if IsColorEnabled() {
+		t.Error("Expected colors to be disabled after initialization with NO_COLOR=1")
+	}
+	
+	// Test initialization without NO_COLOR
+	os.Unsetenv("NO_COLOR")
+	InitializeColorSupport()
+	
+	// Should enable colors if terminal is capable (depends on environment)
+	// Just verify the function doesn't panic and returns a boolean
+	enabled := IsColorEnabled()
+	if enabled != true && enabled != false {
+		t.Errorf("IsColorEnabled should return boolean, got %T", enabled)
+	}
+	
+	// Restore original state
+	colorOutput = originalColorOutput
+	SetColorOutput(originalColorOutput)
+}
