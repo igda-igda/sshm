@@ -133,6 +133,6 @@ func init() {
     fmt.Fprint(cmd.OutOrStdout(), coloredHelp)
   })
   
-  // Apply color formatting to all individual commands
+  // Apply color formatting to all individual commands AFTER they're all added
   applyColorFormattingToAllCommands()
 }
