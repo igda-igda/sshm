@@ -533,9 +533,6 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 - **[golang.org/x/term](https://pkg.go.dev/golang.org/x/term)** - Terminal capability detection and TTY handling
 - **[tview](https://github.com/rivo/tview)** - Future TUI development foundation
 
-### Development Workflow
-- **[Agent OS](https://buildermethods.com/agent-os)** - AI-assisted development methodology and structured workflows
-
 ### Community Standards
 - **[NO_COLOR](https://no-color.org/)** - Accessibility specification for command-line tools
 
