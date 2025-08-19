@@ -103,6 +103,9 @@ Examples:
     fmt.Fprint(cmd.OutOrStdout(), coloredHelp)
   })
   
+  // Apply color formatting to all individual commands for testing
+  applyColorFormattingToAllCommands()
+  
   return cmd
 }
 
@@ -117,7 +120,7 @@ func init() {
   rootCmd.AddCommand(importCmd)
   rootCmd.AddCommand(exportCmd)
   
-  // Set custom help template with color formatting
+  // Set custom help template with color formatting for root command
   rootCmd.SetHelpFunc(func(cmd *cobra.Command, args []string) {
     // Create comprehensive help text including Long description
     helpText := ""
@@ -129,4 +132,7 @@ func init() {
     coloredHelp := color.FormatHelp(helpText)
     fmt.Fprint(cmd.OutOrStdout(), coloredHelp)
   })
+  
+  // Apply color formatting to all individual commands
+  applyColorFormattingToAllCommands()
 }

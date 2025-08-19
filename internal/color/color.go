@@ -165,12 +165,46 @@ func FormatHelp(helpText string) string {
 		
 		// Format CLI flags (lines containing --)
 		if strings.Contains(line, "--") {
-			// Replace flag patterns with colored versions
+			// Use a more careful approach to replace flags without breaking other text
 			formatted := line
+			
+			// Find all flag patterns (--word or -word followed by punctuation or whitespace)
 			words := strings.Fields(line)
 			for _, word := range words {
-				if strings.HasPrefix(word, "--") || strings.HasPrefix(word, "-") {
-					formatted = strings.ReplaceAll(formatted, word, Flag(word))
+				// Handle long flags (--flag) and short flags (-f)
+				if strings.HasPrefix(word, "--") {
+					// Extract the flag part (might have trailing punctuation like --flag: or --flag,)
+					flagEnd := len(word)
+					for i, r := range word[2:] {
+						if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9') || r == '-' || r == '_') {
+							flagEnd = i + 2
+							break
+						}
+					}
+					
+					if flagEnd > 2 {
+						flagPart := word[:flagEnd]
+						remainder := word[flagEnd:]
+						coloredFlag := Flag(flagPart) + remainder
+						// Replace the exact word occurrence
+						formatted = strings.Replace(formatted, word, coloredFlag, 1)
+					}
+				} else if strings.HasPrefix(word, "-") && len(word) >= 2 {
+					// Short flag like -a, -h, etc.
+					if word[1] != '-' { // Not a long flag starting with --
+						flagEnd := 2 // At minimum, flag is like "-a"
+						for i, r := range word[2:] {
+							if !((r >= 'a' && r <= 'z') || (r >= 'A' && r <= 'Z') || (r >= '0' && r <= '9')) {
+								flagEnd = i + 2
+								break
+							}
+						}
+						
+						flagPart := word[:flagEnd]
+						remainder := word[flagEnd:]
+						coloredFlag := Flag(flagPart) + remainder
+						formatted = strings.Replace(formatted, word, coloredFlag, 1)
+					}
 				}
 			}
 			formattedLines = append(formattedLines, formatted)
