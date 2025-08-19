@@ -6,6 +6,7 @@ import (
   "text/tabwriter"
 
   "github.com/spf13/cobra"
+  "sshm/internal/color"
   "sshm/internal/config"
 )
 
@@ -59,11 +60,11 @@ func runListCommand(output io.Writer, profileName string) error {
 
   if len(servers) == 0 {
     if profileName != "" {
-      fmt.Fprintf(output, "📋 No servers found in profile '%s'.\n", profileName)
-      fmt.Fprintln(output, "💡 Use 'sshm profile assign <server-name> <profile-name>' to assign servers to this profile.")
+      fmt.Fprintf(output, "%s\n", color.InfoMessage("No servers found in profile '%s'", profileName))
+      fmt.Fprintln(output, color.InfoText("Use 'sshm profile assign <server-name> <profile-name>' to assign servers to this profile."))
     } else {
-      fmt.Fprintln(output, "📋 No servers configured.")
-      fmt.Fprintln(output, "💡 Use 'sshm add <server-name>' to add a server.")
+      fmt.Fprintln(output, color.InfoMessage("No servers configured."))
+      fmt.Fprintln(output, color.InfoText("Use 'sshm add <server-name>' to add a server."))
     }
     return nil
   }
@@ -91,12 +92,12 @@ func runListCommand(output io.Writer, profileName string) error {
 
   w.Flush()
   
-  fmt.Fprintf(output, "\n📊 %s: %d server(s)\n", contextMessage, len(servers))
+  fmt.Fprintf(output, "\n%s\n", color.InfoMessage("%s: %d server(s)", contextMessage, len(servers)))
   if profileName != "" {
-    fmt.Fprintln(output, "💡 Use 'sshm connect <server-name>' to connect to a server")
-    fmt.Fprintln(output, "💡 Use 'sshm batch --profile "+profileName+"' to connect to all servers in this profile")
+    fmt.Fprintln(output, color.InfoText("Use 'sshm connect <server-name>' to connect to a server"))
+    fmt.Fprintf(output, "%s\n", color.InfoText("Use 'sshm batch --profile %s' to connect to all servers in this profile", profileName))
   } else {
-    fmt.Fprintln(output, "💡 Use 'sshm connect <server-name>' to connect to a server")
+    fmt.Fprintln(output, color.InfoText("Use 'sshm connect <server-name>' to connect to a server"))
   }
   return nil
 }

@@ -209,8 +209,8 @@ func runAddCommand(cmd *cobra.Command, args []string, output io.Writer) error {
     return fmt.Errorf("❌ Failed to save configuration: %w", err)
   }
 
-  fmt.Fprintf(output, "\n✅ Server '%s' added successfully!\n", serverName)
-  fmt.Fprintf(output, "💡 Use 'sshm connect %s' to connect to this server\n", serverName)
+  fmt.Fprintf(output, "\n%s\n", color.SuccessMessage("Server '%s' added successfully!", serverName))
+  fmt.Fprintf(output, "%s\n", color.InfoMessage("Use 'sshm connect %s' to connect to this server", serverName))
   return nil
 }
 

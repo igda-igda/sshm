@@ -204,3 +204,159 @@ func TestColorOutputToggle(t *testing.T) {
 		t.Errorf("Expected plain text '%s', got '%s'", text, plain)
 	}
 }
+
+func TestStatusMessageHelpers(t *testing.T) {
+	// Ensure colors are enabled for testing
+	os.Unsetenv("NO_COLOR")
+	SetColorOutput(true)
+
+	tests := []struct {
+		name     string
+		function func(string, ...interface{}) string
+		input    string
+		prefix   string
+		contains string // ANSI color code
+	}{
+		{
+			name:     "SuccessMessage",
+			function: SuccessMessage,
+			input:    "Operation completed successfully",
+			prefix:   "✅ ",
+			contains: "\x1b[32m", // Green
+		},
+		{
+			name:     "ErrorMessage",
+			function: ErrorMessage,
+			input:    "Operation failed",
+			prefix:   "❌ ",
+			contains: "\x1b[31m", // Red
+		},
+		{
+			name:     "WarningMessage",
+			function: WarningMessage,
+			input:    "Operation has warnings",
+			prefix:   "⚠️  ",
+			contains: "\x1b[33m", // Yellow
+		},
+		{
+			name:     "InfoMessage",
+			function: InfoMessage,
+			input:    "Operation info",
+			prefix:   "ℹ️  ",
+			contains: "\x1b[34m", // Blue
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.function(tt.input)
+			
+			// Check for color codes
+			if !strings.Contains(result, tt.contains) {
+				t.Errorf("Expected %s to contain color code %s, got: %s", tt.name, tt.contains, result)
+			}
+			
+			// Check for prefix and message content
+			if !strings.Contains(result, tt.prefix) {
+				t.Errorf("Expected %s to contain prefix %s, got: %s", tt.name, tt.prefix, result)
+			}
+			
+			if !strings.Contains(result, tt.input) {
+				t.Errorf("Expected %s to contain input text %s, got: %s", tt.name, tt.input, result)
+			}
+		})
+	}
+}
+
+func TestStatusTextHelpers(t *testing.T) {
+	// Ensure colors are enabled for testing
+	os.Unsetenv("NO_COLOR")
+	SetColorOutput(true)
+
+	tests := []struct {
+		name     string
+		function func(string, ...interface{}) string
+		input    string
+		contains string // ANSI color code
+	}{
+		{
+			name:     "SuccessText",
+			function: SuccessText,
+			input:    "Operation completed successfully",
+			contains: "\x1b[32m", // Green
+		},
+		{
+			name:     "ErrorText",
+			function: ErrorText,
+			input:    "Operation failed",
+			contains: "\x1b[31m", // Red
+		},
+		{
+			name:     "WarningText",
+			function: WarningText,
+			input:    "Operation has warnings",
+			contains: "\x1b[33m", // Yellow
+		},
+		{
+			name:     "InfoText",
+			function: InfoText,
+			input:    "Operation info",
+			contains: "\x1b[34m", // Blue
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := tt.function(tt.input)
+			
+			// Check for color codes
+			if !strings.Contains(result, tt.contains) {
+				t.Errorf("Expected %s to contain color code %s, got: %s", tt.name, tt.contains, result)
+			}
+			
+			// Check for message content (no prefix expected)
+			if !strings.Contains(result, tt.input) {
+				t.Errorf("Expected %s to contain input text %s, got: %s", tt.name, tt.input, result)
+			}
+		})
+	}
+}
+
+func TestStatusMessageFormatting(t *testing.T) {
+	// Ensure colors are enabled for testing
+	os.Unsetenv("NO_COLOR")
+	SetColorOutput(true)
+
+	// Test formatted message
+	result := SuccessMessage("Server %s connected on port %d", "web-server", 22)
+	expected := "Server web-server connected on port 22"
+	
+	if !strings.Contains(result, expected) {
+		t.Errorf("Expected formatted message to contain '%s', got: %s", expected, result)
+	}
+	
+	if !strings.Contains(result, "✅") {
+		t.Error("Expected success message to contain success emoji")
+	}
+}
+
+func TestStatusMessageNoColor(t *testing.T) {
+	// Disable colors
+	SetColorOutput(false)
+
+	result := SuccessMessage("Operation completed")
+	expected := "✅ Operation completed"
+	
+	// Should not contain ANSI codes
+	if strings.Contains(result, "\x1b[") {
+		t.Errorf("Expected no ANSI codes when colors disabled, got: %s", result)
+	}
+	
+	// Should contain emoji and message
+	if result != expected {
+		t.Errorf("Expected '%s', got '%s'", expected, result)
+	}
+	
+	// Reset for other tests
+	SetColorOutput(true)
+}

@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+	"sshm/internal/color"
 	"sshm/internal/config"
 )
 
@@ -107,7 +108,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 		if err == nil {
 			// Server exists - update it
 			if err := cfg.RemoveServer(existing.Name); err != nil {
-				fmt.Printf("Warning: failed to remove existing server %s: %v\n", existing.Name, err)
+				fmt.Printf("%s\n", color.WarningMessage("failed to remove existing server %s: %v", existing.Name, err))
 				continue
 			}
 			updated++
@@ -117,7 +118,7 @@ func runImport(cmd *cobra.Command, args []string) error {
 		
 		// Add the server
 		if err := cfg.AddServer(server); err != nil {
-			fmt.Printf("Warning: failed to import server %s: %v\n", server.Name, err)
+			fmt.Printf("%s\n", color.WarningMessage("failed to import server %s: %v", server.Name, err))
 			continue
 		}
 	}
@@ -129,13 +130,13 @@ func runImport(cmd *cobra.Command, args []string) error {
 		if err == nil {
 			// Profile exists - update it
 			if err := cfg.RemoveProfile(existing.Name); err != nil {
-				fmt.Printf("Warning: failed to remove existing profile %s: %v\n", existing.Name, err)
+				fmt.Printf("%s\n", color.WarningMessage("failed to remove existing profile %s: %v", existing.Name, err))
 				continue
 			}
 		}
 		
 		if err := cfg.AddProfile(profile); err != nil {
-			fmt.Printf("Warning: failed to import profile %s: %v\n", profile.Name, err)
+			fmt.Printf("%s\n", color.WarningMessage("failed to import profile %s: %v", profile.Name, err))
 			continue
 		}
 	}
@@ -156,14 +157,14 @@ func runImport(cmd *cobra.Command, args []string) error {
 		// Remove existing profile if it exists
 		if existing, err := cfg.GetProfile(importProfile); err == nil {
 			if err := cfg.RemoveProfile(existing.Name); err != nil {
-				fmt.Printf("Warning: failed to remove existing profile %s: %v\n", existing.Name, err)
+				fmt.Printf("%s\n", color.WarningMessage("failed to remove existing profile %s: %v", existing.Name, err))
 			}
 		}
 		
 		if err := cfg.AddProfile(profile); err != nil {
-			fmt.Printf("Warning: failed to create profile %s: %v\n", importProfile, err)
+			fmt.Printf("%s\n", color.WarningMessage("failed to create profile %s: %v", importProfile, err))
 		} else {
-			fmt.Printf("Created profile '%s' with %d servers\n", importProfile, len(serverNames))
+			fmt.Printf("%s\n", color.SuccessMessage("Created profile '%s' with %d servers", importProfile, len(serverNames)))
 		}
 	}
 	
@@ -173,13 +174,13 @@ func runImport(cmd *cobra.Command, args []string) error {
 	}
 	
 	// Print summary
-	fmt.Printf("Import completed:\n")
-	fmt.Printf("  • %d servers imported\n", imported)
+	fmt.Printf("%s\n", color.SuccessMessage("Import completed:"))
+	fmt.Printf("  • %s\n", color.InfoText("%d servers imported", imported))
 	if updated > 0 {
-		fmt.Printf("  • %d servers updated\n", updated)
+		fmt.Printf("  • %s\n", color.InfoText("%d servers updated", updated))
 	}
 	if len(profiles) > 0 {
-		fmt.Printf("  • %d profiles imported\n", len(profiles))
+		fmt.Printf("  • %s\n", color.InfoText("%d profiles imported", len(profiles)))
 	}
 	
 	return nil
@@ -221,7 +222,7 @@ func parseYAMLConfig(filePath string) ([]config.Server, []config.Profile, error)
 	var validServers []config.Server
 	for _, server := range cfg.Servers {
 		if err := server.Validate(); err != nil {
-			fmt.Printf("Warning: skipping invalid server %s: %v\n", server.Name, err)
+			fmt.Printf("%s\n", color.WarningMessage("skipping invalid server %s: %v", server.Name, err))
 			continue
 		}
 		validServers = append(validServers, server)
@@ -246,7 +247,7 @@ func parseJSONConfig(filePath string) ([]config.Server, []config.Profile, error)
 	var validServers []config.Server
 	for _, server := range cfg.Servers {
 		if err := server.Validate(); err != nil {
-			fmt.Printf("Warning: skipping invalid server %s: %v\n", server.Name, err)
+			fmt.Printf("%s\n", color.WarningMessage("skipping invalid server %s: %v", server.Name, err))
 			continue
 		}
 		validServers = append(validServers, server)

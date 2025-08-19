@@ -9,6 +9,7 @@ import (
 
 	"github.com/spf13/cobra"
 	"gopkg.in/yaml.v3"
+	"sshm/internal/color"
 	"sshm/internal/config"
 )
 
@@ -87,7 +88,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 			Profiles: []config.Profile{*profile},
 		}
 		
-		fmt.Printf("Exporting profile '%s' with %d servers\n", exportProfile, len(servers))
+		fmt.Printf("%s\n", color.InfoMessage("Exporting profile '%s' with %d servers", exportProfile, len(servers)))
 		
 	} else {
 		// Export all servers and profiles
@@ -96,7 +97,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 			Profiles: cfg.GetProfiles(),
 		}
 		
-		fmt.Printf("Exporting %d servers and %d profiles\n", len(exportConfig.Servers), len(exportConfig.Profiles))
+		fmt.Printf("%s\n", color.InfoMessage("Exporting %d servers and %d profiles", len(exportConfig.Servers), len(exportConfig.Profiles)))
 	}
 	
 	// Create output directory if it doesn't exist
@@ -126,7 +127,7 @@ func runExport(cmd *cobra.Command, args []string) error {
 		return fmt.Errorf("failed to write export file: %w", err)
 	}
 	
-	fmt.Printf("Configuration exported to %s (%s format)\n", outputPath, format)
+	fmt.Printf("%s\n", color.SuccessMessage("Configuration exported to %s (%s format)", outputPath, format))
 	
 	return nil
 }

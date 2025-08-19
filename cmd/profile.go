@@ -8,6 +8,7 @@ import (
 	"text/tabwriter"
 
 	"github.com/spf13/cobra"
+	"sshm/internal/color"
 	"sshm/internal/config"
 )
 
@@ -82,7 +83,7 @@ Examples:
 			return fmt.Errorf("failed to save configuration: %w", err)
 		}
 
-		cmd.Printf("Profile '%s' created successfully\n", profileName)
+		cmd.Printf("%s\n", color.SuccessMessage("Profile '%s' created successfully", profileName))
 		return nil
 	},
 }
@@ -105,7 +106,7 @@ Examples:
 
 		profiles := cfg.GetProfiles()
 		if len(profiles) == 0 {
-			cmd.Println("No profiles configured")
+			cmd.Printf("%s\n", color.InfoMessage("No profiles configured"))
 			return nil
 		}
 
@@ -177,7 +178,7 @@ Examples:
 
 			response = strings.ToLower(strings.TrimSpace(response))
 			if response != "y" && response != "yes" {
-				cmd.Println("Deletion cancelled")
+				cmd.Printf("%s\n", color.InfoMessage("Deletion cancelled"))
 				return nil
 			}
 		}
@@ -192,7 +193,7 @@ Examples:
 			return fmt.Errorf("failed to save configuration: %w", err)
 		}
 
-		cmd.Printf("Profile '%s' deleted successfully\n", profileName)
+		cmd.Printf("%s\n", color.SuccessMessage("Profile '%s' deleted successfully", profileName))
 		return nil
 	},
 }
@@ -229,7 +230,7 @@ Examples:
 			return fmt.Errorf("failed to save configuration: %w", err)
 		}
 
-		cmd.Printf("Server '%s' assigned to profile '%s'\n", serverName, profileName)
+		cmd.Printf("%s\n", color.SuccessMessage("Server '%s' assigned to profile '%s'", serverName, profileName))
 		return nil
 	},
 }
@@ -266,7 +267,7 @@ Examples:
 			return fmt.Errorf("failed to save configuration: %w", err)
 		}
 
-		cmd.Printf("Server '%s' unassigned from profile '%s'\n", serverName, profileName)
+		cmd.Printf("%s\n", color.SuccessMessage("Server '%s' unassigned from profile '%s'", serverName, profileName))
 		return nil
 	},
 }

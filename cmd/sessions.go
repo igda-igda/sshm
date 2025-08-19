@@ -6,6 +6,7 @@ import (
   "text/tabwriter"
 
   "github.com/spf13/cobra"
+  "sshm/internal/color"
   "sshm/internal/tmux"
 )
 
@@ -91,8 +92,8 @@ func runSessionsListCommand(output io.Writer) error {
   }
 
   if len(sessions) == 0 {
-    fmt.Fprintln(output, "📋 No active tmux sessions found.")
-    fmt.Fprintln(output, "💡 Use 'sshm connect <server>' or 'sshm batch --profile <profile>' to create sessions.")
+    fmt.Fprintf(output, "%s\n", color.InfoMessage("No active tmux sessions found."))
+    fmt.Fprintf(output, "%s\n", color.InfoText("Use 'sshm connect <server>' or 'sshm batch --profile <profile>' to create sessions."))
     return nil
   }
 
@@ -112,9 +113,9 @@ func runSessionsListCommand(output io.Writer) error {
 
   w.Flush()
   
-  fmt.Fprintf(output, "\n📊 Active sessions: %d\n", len(sessions))
-  fmt.Fprintln(output, "💡 Use 'sshm sessions kill <session-name>' to terminate a session")
-  fmt.Fprintln(output, "💡 Use 'tmux attach-session -t <session-name>' to attach to a session")
+  fmt.Fprintf(output, "\n%s\n", color.InfoMessage("Active sessions: %d", len(sessions)))
+  fmt.Fprintf(output, "%s\n", color.InfoText("Use 'sshm sessions kill <session-name>' to terminate a session"))
+  fmt.Fprintf(output, "%s\n", color.InfoText("Use 'tmux attach-session -t <session-name>' to attach to a session"))
   return nil
 }
 
@@ -146,13 +147,13 @@ func runSessionsKillCommand(sessionName string, output io.Writer) error {
   }
 
   // Kill the session
-  fmt.Fprintf(output, "🔪 Killing tmux session '%s'...\n", sessionName)
+  fmt.Fprintf(output, "%s\n", color.InfoMessage("Killing tmux session '%s'...", sessionName))
   err = tmuxManager.KillSession(sessionName)
   if err != nil {
     return fmt.Errorf("❌ Failed to kill session '%s': %w", sessionName, err)
   }
 
-  fmt.Fprintf(output, "✅ Session '%s' terminated successfully\n", sessionName)
+  fmt.Fprintf(output, "%s\n", color.SuccessMessage("Session '%s' terminated successfully", sessionName))
   return nil
 }
 
@@ -172,11 +173,11 @@ func runSessionsCleanupCommand(force bool, output io.Writer) error {
   }
 
   if len(sessions) == 0 {
-    fmt.Fprintln(output, "📋 No active tmux sessions found.")
+    fmt.Fprintf(output, "%s\n", color.InfoMessage("No active tmux sessions found."))
     return nil
   }
 
-  fmt.Fprintf(output, "🔍 Found %d active tmux session(s):\n", len(sessions))
+  fmt.Fprintf(output, "%s\n", color.InfoMessage("Found %d active tmux session(s):", len(sessions)))
   for _, sessionName := range sessions {
     sessionType := "Individual"
     if isGroupSession(sessionName) {
@@ -186,27 +187,27 @@ func runSessionsCleanupCommand(force bool, output io.Writer) error {
   }
 
   if !force {
-    fmt.Fprintln(output, "\n⚠️  Session cleanup will terminate all SSH connections in these sessions.")
-    fmt.Fprintln(output, "💡 Use 'sshm sessions cleanup --force' to proceed with cleanup")
-    fmt.Fprintln(output, "💡 Use 'sshm sessions kill <session-name>' to terminate specific sessions")
+    fmt.Fprintf(output, "\n%s\n", color.WarningMessage("Session cleanup will terminate all SSH connections in these sessions."))
+    fmt.Fprintf(output, "%s\n", color.InfoText("Use 'sshm sessions cleanup --force' to proceed with cleanup"))
+    fmt.Fprintf(output, "%s\n", color.InfoText("Use 'sshm sessions kill <session-name>' to terminate specific sessions"))
     return nil
   }
 
   // Force cleanup - kill all sessions
-  fmt.Fprintf(output, "\n🔪 Force cleanup enabled. Terminating %d session(s)...\n", len(sessions))
+  fmt.Fprintf(output, "\n%s\n", color.InfoMessage("Force cleanup enabled. Terminating %d session(s)...", len(sessions)))
   
   successCount := 0
   for _, sessionName := range sessions {
     err := tmuxManager.KillSession(sessionName)
     if err != nil {
-      fmt.Fprintf(output, "❌ Failed to kill session '%s': %v\n", sessionName, err)
+      fmt.Fprintf(output, "%s\n", color.ErrorMessage("Failed to kill session '%s': %v", sessionName, err))
     } else {
-      fmt.Fprintf(output, "✅ Terminated session '%s'\n", sessionName)
+      fmt.Fprintf(output, "%s\n", color.SuccessMessage("Terminated session '%s'", sessionName))
       successCount++
     }
   }
 
-  fmt.Fprintf(output, "\n📊 Cleanup complete: %d/%d sessions terminated\n", successCount, len(sessions))
+  fmt.Fprintf(output, "\n%s\n", color.InfoMessage("Cleanup complete: %d/%d sessions terminated", successCount, len(sessions)))
   return nil
 }
 

@@ -8,6 +8,7 @@ import (
   "strings"
 
   "github.com/spf13/cobra"
+  "sshm/internal/color"
   "sshm/internal/config"
 )
 
@@ -54,7 +55,7 @@ func runRemoveCommand(cmd *cobra.Command, args []string, output io.Writer) error
   
   if !skipConfirmation {
     // Display server details and confirmation prompt
-    fmt.Fprintf(output, "🗑️  Server to remove:\n")
+    fmt.Fprintf(output, "%s\n", color.InfoMessage("Server to remove:"))
     fmt.Fprintf(output, "   Name: %s\n", server.Name)
     fmt.Fprintf(output, "   Hostname: %s:%d\n", server.Hostname, server.Port)
     fmt.Fprintf(output, "   Username: %s\n", server.Username)
@@ -74,7 +75,7 @@ func runRemoveCommand(cmd *cobra.Command, args []string, output io.Writer) error
     
     confirmation := strings.TrimSpace(strings.ToLower(scanner.Text()))
     if confirmation != "y" && confirmation != "yes" {
-      fmt.Fprintln(output, "❌ Removal cancelled.")
+      fmt.Fprintf(output, "%s\n", color.InfoMessage("Removal cancelled."))
       return nil
     }
   }
@@ -89,7 +90,7 @@ func runRemoveCommand(cmd *cobra.Command, args []string, output io.Writer) error
     return fmt.Errorf("❌ Failed to save configuration: %w", err)
   }
 
-  fmt.Fprintf(output, "✅ Server '%s' removed successfully!\n", serverName)
+  fmt.Fprintf(output, "%s\n", color.SuccessMessage("Server '%s' removed successfully!", serverName))
   return nil
 }
 

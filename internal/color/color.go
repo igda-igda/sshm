@@ -1,6 +1,7 @@
 package color
 
 import (
+	"fmt"
 	"os"
 	"strings"
 
@@ -243,4 +244,78 @@ func FormatCommandList(commands []string) []string {
 		formatted = append(formatted, Command(cmd))
 	}
 	return formatted
+}
+
+// Status message helper functions with prefixes
+func SuccessMessage(format string, args ...interface{}) string {
+	message := fmt.Sprintf(format, args...)
+	if !IsColorEnabled() {
+		return "✅ " + message
+	}
+	return successColor.Sprint("✅ " + message)
+}
+
+func ErrorMessage(format string, args ...interface{}) string {
+	message := fmt.Sprintf(format, args...)
+	if !IsColorEnabled() {
+		return "❌ " + message
+	}
+	return errorColor.Sprint("❌ " + message)
+}
+
+func WarningMessage(format string, args ...interface{}) string {
+	message := fmt.Sprintf(format, args...)
+	if !IsColorEnabled() {
+		return "⚠️  " + message
+	}
+	return warningColor.Sprint("⚠️  " + message)
+}
+
+func InfoMessage(format string, args ...interface{}) string {
+	message := fmt.Sprintf(format, args...)
+	if !IsColorEnabled() {
+		return "ℹ️  " + message
+	}
+	return infoColor.Sprint("ℹ️  " + message)
+}
+
+// Error helper functions for fmt.Errorf - these preserve error wrapping
+func ErrorMessagef(format string, args ...interface{}) string {
+	if !IsColorEnabled() {
+		return "❌ " + format
+	}
+	return errorColor.Sprint("❌ " + format)
+}
+
+// Status message functions without prefixes
+func SuccessText(format string, args ...interface{}) string {
+	message := fmt.Sprintf(format, args...)
+	if !IsColorEnabled() {
+		return message
+	}
+	return successColor.Sprint(message)
+}
+
+func ErrorText(format string, args ...interface{}) string {
+	message := fmt.Sprintf(format, args...)
+	if !IsColorEnabled() {
+		return message
+	}
+	return errorColor.Sprint(message)
+}
+
+func WarningText(format string, args ...interface{}) string {
+	message := fmt.Sprintf(format, args...)
+	if !IsColorEnabled() {
+		return message
+	}
+	return warningColor.Sprint(message)
+}
+
+func InfoText(format string, args ...interface{}) string {
+	message := fmt.Sprintf(format, args...)
+	if !IsColorEnabled() {
+		return message
+	}
+	return infoColor.Sprint(message)
 }
