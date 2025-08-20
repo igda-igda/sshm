@@ -2,8 +2,12 @@ package tui
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"testing"
 	"time"
+
+	"sshm/internal/config"
 )
 
 func TestTUIApplication_NewApp(t *testing.T) {
@@ -117,5 +121,384 @@ func TestTUIApplication_ErrorHandling(t *testing.T) {
 		} else {
 			t.Logf("App returned error after stop (may be expected): %v", err)
 		}
+	}
+}
+
+// createTestConfig creates a test configuration with sample servers and profiles
+func createTestConfig(t *testing.T) *config.Config {
+	cfg := &config.Config{
+		Servers: []config.Server{
+			{
+				Name:     "test-web-01",
+				Hostname: "192.168.1.10",
+				Port:     22,
+				Username: "ubuntu",
+				AuthType: "key",
+				KeyPath:  "/home/user/.ssh/id_rsa",
+			},
+			{
+				Name:     "prod-db-01",
+				Hostname: "10.0.0.5",
+				Port:     22,
+				Username: "admin",
+				AuthType: "password",
+			},
+			{
+				Name:     "staging-api",
+				Hostname: "staging.api.example.com",
+				Port:     2222,
+				Username: "deploy",
+				AuthType: "key",
+				KeyPath:  "/home/user/.ssh/deploy_key",
+			},
+		},
+		Profiles: []config.Profile{
+			{
+				Name:        "development",
+				Description: "Development environment servers",
+				Servers:     []string{"test-web-01"},
+			},
+			{
+				Name:        "production",
+				Description: "Production environment servers",
+				Servers:     []string{"prod-db-01"},
+			},
+			{
+				Name:        "staging",
+				Description: "Staging environment servers",
+				Servers:     []string{"staging-api"},
+			},
+		},
+	}
+	return cfg
+}
+
+func TestServerList_DataLoading(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Verify that servers were loaded
+	servers := app.config.GetServers()
+	if len(servers) != 3 {
+		t.Errorf("Expected 3 servers, got %d", len(servers))
+	}
+
+	// Verify server table has correct number of rows (including header)
+	rowCount := app.serverList.GetRowCount()
+	expectedRows := len(servers) + 1 // +1 for header row
+	if rowCount != expectedRows {
+		t.Errorf("Expected %d rows in server table, got %d", expectedRows, rowCount)
+	}
+}
+
+func TestServerList_DisplayFormatting(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test header row formatting
+	headerCells := []string{"Name", "Host", "Port", "User", "Auth", "Status", "Profile"}
+	for col, expectedHeader := range headerCells {
+		cell := app.serverList.GetCell(0, col)
+		if cell == nil {
+			t.Errorf("Expected header cell at column %d, got nil", col)
+			continue
+		}
+		if cell.Text != expectedHeader {
+			t.Errorf("Expected header cell %d to be '%s', got '%s'", col, expectedHeader, cell.Text)
+		}
+	}
+
+	// Test data row formatting for first server
+	if app.serverList.GetRowCount() > 1 {
+		// Check Name column
+		nameCell := app.serverList.GetCell(1, 0)
+		if nameCell == nil || nameCell.Text != "test-web-01" {
+			t.Errorf("Expected first server name to be 'test-web-01', got %v", nameCell)
+		}
+
+		// Check Host column
+		hostCell := app.serverList.GetCell(1, 1)
+		if hostCell == nil || hostCell.Text != "192.168.1.10" {
+			t.Errorf("Expected first server host to be '192.168.1.10', got %v", hostCell)
+		}
+
+		// Check Port column
+		portCell := app.serverList.GetCell(1, 2)
+		if portCell == nil || portCell.Text != "22" {
+			t.Errorf("Expected first server port to be '22', got %v", portCell)
+		}
+
+		// Check User column
+		userCell := app.serverList.GetCell(1, 3)
+		if userCell == nil || userCell.Text != "ubuntu" {
+			t.Errorf("Expected first server user to be 'ubuntu', got %v", userCell)
+		}
+
+		// Check Auth column
+		authCell := app.serverList.GetCell(1, 4)
+		if authCell == nil || authCell.Text != "key" {
+			t.Errorf("Expected first server auth to be 'key', got %v", authCell)
+		}
+	}
+}
+
+func TestServerList_EmptyConfiguration(t *testing.T) {
+	// Create a temporary directory for empty test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app with empty config
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Verify that no servers are loaded
+	servers := app.config.GetServers()
+	if len(servers) != 0 {
+		t.Errorf("Expected 0 servers in empty config, got %d", len(servers))
+	}
+
+	// Verify server table has only header row
+	rowCount := app.serverList.GetRowCount()
+	if rowCount != 1 {
+		t.Errorf("Expected 1 row (header only) in empty server table, got %d", rowCount)
+	}
+}
+
+func TestServerList_RefreshConfiguration(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Start with empty config
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Verify empty state
+	initialRowCount := app.serverList.GetRowCount()
+	if initialRowCount != 1 {
+		t.Errorf("Expected 1 row initially (header only), got %d", initialRowCount)
+	}
+
+	// Create and save test config
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Refresh configuration
+	if err := app.RefreshConfig(); err != nil {
+		t.Fatalf("Failed to refresh config: %v", err)
+	}
+
+	// Verify servers are now loaded
+	servers := app.config.GetServers()
+	if len(servers) != 3 {
+		t.Errorf("Expected 3 servers after refresh, got %d", len(servers))
+	}
+
+	// Verify server table has correct number of rows
+	rowCount := app.serverList.GetRowCount()
+	expectedRows := len(servers) + 1 // +1 for header row
+	if rowCount != expectedRows {
+		t.Errorf("Expected %d rows after refresh, got %d", expectedRows, rowCount)
+	}
+}
+
+func TestServerList_KeyboardNavigation(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Initial state should have first server selected (row 1)
+	currentRow, _ := app.serverList.GetSelection()
+	if currentRow != 1 {
+		t.Errorf("Expected initial selection at row 1, got %d", currentRow)
+	}
+
+	// Test navigation down
+	app.navigateDown()
+	currentRow, _ = app.serverList.GetSelection()
+	if currentRow != 2 {
+		t.Errorf("Expected selection at row 2 after navigating down, got %d", currentRow)
+	}
+
+	// Test navigation up
+	app.navigateUp()
+	currentRow, _ = app.serverList.GetSelection()
+	if currentRow != 1 {
+		t.Errorf("Expected selection at row 1 after navigating up, got %d", currentRow)
+	}
+
+	// Test navigation up from first row (should stay at row 1)
+	app.navigateUp()
+	currentRow, _ = app.serverList.GetSelection()
+	if currentRow != 1 {
+		t.Errorf("Expected selection to stay at row 1 when navigating up from first row, got %d", currentRow)
+	}
+
+	// Test navigation down to last row
+	for i := 1; i < app.serverList.GetRowCount()-1; i++ {
+		app.navigateDown()
+	}
+	currentRow, _ = app.serverList.GetSelection()
+	expectedLastRow := app.serverList.GetRowCount() - 1
+	if currentRow != expectedLastRow {
+		t.Errorf("Expected selection at last row %d, got %d", expectedLastRow, currentRow)
+	}
+
+	// Test navigation down from last row (should stay at last row)
+	app.navigateDown()
+	currentRow, _ = app.serverList.GetSelection()
+	if currentRow != expectedLastRow {
+		t.Errorf("Expected selection to stay at last row %d when navigating down from last row, got %d", expectedLastRow, currentRow)
+	}
+}
+
+func TestServerList_ProfileFiltering(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Initially should show all servers
+	initialRowCount := app.serverList.GetRowCount()
+	if initialRowCount != 4 { // 3 servers + 1 header
+		t.Errorf("Expected 4 rows initially (3 servers + header), got %d", initialRowCount)
+	}
+
+	// Toggle to first profile (development)
+	app.toggleProfileFilter()
+	
+	// Should show only 1 server from development profile + header
+	filteredRowCount := app.serverList.GetRowCount()
+	if filteredRowCount != 2 { // 1 server + 1 header
+		t.Errorf("Expected 2 rows after filtering to development profile, got %d", filteredRowCount)
+	}
+
+	// Verify the server shown is from development profile
+	if filteredRowCount > 1 {
+		nameCell := app.serverList.GetCell(1, 0)
+		if nameCell == nil || nameCell.Text != "test-web-01" {
+			t.Errorf("Expected first filtered server to be 'test-web-01', got %v", nameCell)
+		}
+	}
+
+	// Toggle to production profile
+	app.toggleProfileFilter()
+	
+	// Should show only 1 server from production profile + header
+	filteredRowCount = app.serverList.GetRowCount()
+	if filteredRowCount != 2 { // 1 server + 1 header
+		t.Errorf("Expected 2 rows after filtering to production profile, got %d", filteredRowCount)
+	}
+
+	// Verify the server shown is from production profile
+	if filteredRowCount > 1 {
+		nameCell := app.serverList.GetCell(1, 0)
+		if nameCell == nil || nameCell.Text != "prod-db-01" {
+			t.Errorf("Expected production filtered server to be 'prod-db-01', got %v", nameCell)
+		}
+	}
+
+	// Toggle back to all servers
+	app.toggleProfileFilter() // staging
+	app.toggleProfileFilter() // back to all
+	
+	// Should show all servers again
+	finalRowCount := app.serverList.GetRowCount()
+	if finalRowCount != 4 { // 3 servers + 1 header
+		t.Errorf("Expected 4 rows after returning to 'all' filter, got %d", finalRowCount)
+	}
+}
+
+func TestServerList_EmptyNavigation(t *testing.T) {
+	// Create a temporary directory for empty test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app with empty config
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Navigation on empty list should not panic or change selection
+	initialRow, _ := app.serverList.GetSelection()
+	
+	app.navigateUp()
+	currentRow, _ := app.serverList.GetSelection()
+	if currentRow != initialRow {
+		t.Errorf("Selection changed during navigation on empty list: initial=%d, current=%d", initialRow, currentRow)
+	}
+
+	app.navigateDown()
+	currentRow, _ = app.serverList.GetSelection()
+	if currentRow != initialRow {
+		t.Errorf("Selection changed during navigation on empty list: initial=%d, current=%d", initialRow, currentRow)
 	}
 }
