@@ -261,6 +261,12 @@ func (t *TUIApp) setupKeyBindings() {
 		case 's', 'S':
 			t.switchFocus()
 			return nil
+		case 'e', 'E':
+			t.editSelectedServer()
+			return nil
+		case 'd', 'D':
+			t.deleteSelectedServer()
+			return nil
 		}
 		
 		return event
@@ -561,6 +567,8 @@ Actions:
   q           Quit application
   ?           Show this help
   r           Refresh data
+  e           Edit selected server
+  d           Delete selected server
   
 Profile Navigation (Server panel):
   Tab         Switch to next profile
@@ -574,7 +582,12 @@ Session Management:
 Panel Focus:
   Yellow border indicates active panel
   
-Mouse support: Click to select items`
+Mouse support: Click to select items
+
+Server Actions (when server is selected):
+  Enter       Connect to server
+  e           Edit server configuration
+  d           Delete server (with confirmation)`
 
 	modal := tview.NewModal().
 		SetText(helpText).
@@ -945,4 +958,129 @@ func (t *TUIApp) showSessionErrorModal(message string) {
 		})
 	
 	t.app.SetRoot(modal, true)
+}
+
+// editSelectedServer handles editing the currently selected server
+func (t *TUIApp) editSelectedServer() {
+	if t.focusedPanel != "servers" {
+		return // Only allow editing when focused on servers panel
+	}
+	
+	currentRow, _ := t.serverList.GetSelection()
+	if currentRow <= 0 {
+		return // Header row selected or invalid selection
+	}
+	
+	// Get server name from the selected row
+	nameCell := t.serverList.GetCell(currentRow, 0)
+	if nameCell == nil {
+		return
+	}
+	
+	serverName := nameCell.Text
+	
+	// Show edit modal
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("Edit server: %s\n\n(Server editing functionality will be implemented in CLI integration phase)\n\nThis will open the server configuration for editing.", serverName)).
+		AddButtons([]string{"OK", "Cancel"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			if buttonLabel == "OK" {
+				// TODO: Implement actual editing logic in integration phase
+				// This would typically:
+				// 1. Launch external editor or show edit form
+				// 2. Update configuration
+				// 3. Refresh display
+			}
+			t.app.SetRoot(t.layout, true)
+		})
+	
+	t.app.SetRoot(modal, true)
+}
+
+// deleteSelectedServer handles deleting the currently selected server
+func (t *TUIApp) deleteSelectedServer() {
+	if t.focusedPanel != "servers" {
+		return // Only allow deleting when focused on servers panel
+	}
+	
+	currentRow, _ := t.serverList.GetSelection()
+	if currentRow <= 0 {
+		return // Header row selected or invalid selection
+	}
+	
+	// Get server name from the selected row
+	nameCell := t.serverList.GetCell(currentRow, 0)
+	if nameCell == nil {
+		return
+	}
+	
+	serverName := nameCell.Text
+	
+	// Show confirmation modal
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("Delete server '%s'?\n\nThis action cannot be undone.", serverName)).
+		AddButtons([]string{"Delete", "Cancel"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			if buttonLabel == "Delete" {
+				// Delete the server from configuration
+				if err := t.deleteServerFromConfig(serverName); err != nil {
+					// Show error modal
+					errorModal := tview.NewModal().
+						SetText(fmt.Sprintf("Error deleting server: %s", err.Error())).
+						AddButtons([]string{"OK"}).
+						SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+							t.app.SetRoot(t.layout, true)
+						})
+					t.app.SetRoot(errorModal, true)
+					return
+				}
+				
+				// Refresh the display after successful deletion
+				t.refreshServerList()
+			}
+			t.app.SetRoot(t.layout, true)
+		})
+	
+	t.app.SetRoot(modal, true)
+}
+
+// deleteServerFromConfig removes a server from the configuration
+func (t *TUIApp) deleteServerFromConfig(serverName string) error {
+	// Find and remove the server
+	servers := t.config.GetServers()
+	var updatedServers []config.Server
+	
+	serverFound := false
+	for _, server := range servers {
+		if server.Name != serverName {
+			updatedServers = append(updatedServers, server)
+		} else {
+			serverFound = true
+		}
+	}
+	
+	if !serverFound {
+		return fmt.Errorf("server '%s' not found", serverName)
+	}
+	
+	// Update configuration with the filtered servers
+	t.config.Servers = updatedServers
+	
+	// Also remove from any profiles that contain this server
+	for i, profile := range t.config.Profiles {
+		var updatedProfileServers []string
+		for _, profileServer := range profile.Servers {
+			if profileServer != serverName {
+				updatedProfileServers = append(updatedProfileServers, profileServer)
+			}
+		}
+		t.config.Profiles[i].Servers = updatedProfileServers
+	}
+	
+	// Save the updated configuration
+	if err := t.config.Save(); err != nil {
+		return fmt.Errorf("failed to save configuration: %w", err)
+	}
+	
+	return nil
 }

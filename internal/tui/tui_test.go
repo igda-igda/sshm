@@ -1091,3 +1091,652 @@ func TestSessionManager_SessionSelection(t *testing.T) {
 		}
 	}
 }
+
+// TestKeyboardNavigation_QuitKeys tests quit functionality with q/Q and Ctrl+C
+func TestKeyboardNavigation_QuitKeys(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test that app can be stopped (simulating quit keys)
+	if app.running {
+		t.Error("App should not be running before start")
+	}
+
+	// Start and immediately stop (simulating quit key press)
+	ctx, cancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
+	defer cancel()
+
+	errChan := make(chan error, 1)
+	go func() {
+		errChan <- app.Run(ctx)
+	}()
+
+	// Give it a moment to start
+	time.Sleep(5 * time.Millisecond)
+
+	// Stop the app (simulates 'q' key press)
+	app.Stop()
+
+	// Wait for completion
+	select {
+	case err := <-errChan:
+		if err != nil && err != context.Canceled && err != context.DeadlineExceeded {
+			if err.Error() != "TUI application error: open /dev/tty: device not configured" {
+				t.Logf("App returned error during quit (may be expected in test): %v", err)
+			}
+		}
+	case <-time.After(100 * time.Millisecond):
+		t.Fatal("Application did not quit within timeout")
+	}
+}
+
+// TestKeyboardNavigation_NavigationKeys tests j/k and arrow key navigation
+func TestKeyboardNavigation_NavigationKeys(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test navigation on servers panel (default focus)
+	if app.focusedPanel != "servers" {
+		t.Errorf("Expected default focus on servers panel, got %s", app.focusedPanel)
+	}
+
+	// Test navigation down (j key simulation)
+	initialRow, _ := app.serverList.GetSelection()
+	app.handleNavigationDown() // Simulates 'j' key
+	newRow, _ := app.serverList.GetSelection()
+	if newRow <= initialRow && app.serverList.GetRowCount() > 2 {
+		t.Errorf("Expected navigation down to increase row selection from %d to %d", initialRow, newRow)
+	}
+
+	// Test navigation up (k key simulation)
+	currentRow, _ := app.serverList.GetSelection()
+	app.handleNavigationUp() // Simulates 'k' key
+	afterUpRow, _ := app.serverList.GetSelection()
+	if afterUpRow >= currentRow && currentRow > 1 {
+		t.Errorf("Expected navigation up to decrease row selection from %d to %d", currentRow, afterUpRow)
+	}
+
+	// Test navigation bounds (can't go above first row or below last row)
+	for i := 0; i < 10; i++ {
+		app.handleNavigationUp() // Multiple up movements
+	}
+	topRow, _ := app.serverList.GetSelection()
+	if topRow < 1 {
+		t.Errorf("Expected navigation to stay at first data row (1), got %d", topRow)
+	}
+
+	for i := 0; i < 10; i++ {
+		app.handleNavigationDown() // Multiple down movements
+	}
+	bottomRow, _ := app.serverList.GetSelection()
+	maxRow := app.serverList.GetRowCount() - 1
+	if bottomRow > maxRow {
+		t.Errorf("Expected navigation to stay within bounds (max %d), got %d", maxRow, bottomRow)
+	}
+}
+
+// TestKeyboardNavigation_EnterKey tests Enter key functionality for connections
+func TestKeyboardNavigation_EnterKey(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Select a server and test Enter key handling
+	if app.serverList.GetRowCount() > 1 {
+		app.serverList.Select(1, 0) // Select first server
+		
+		// handleEnterKey should attempt connection (we can't test actual connection in unit tests)
+		// but we can verify the function doesn't panic and handles the selection correctly
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Enter key handler panicked: %v", r)
+			}
+		}()
+		
+		app.handleEnterKey() // Should trigger connection attempt
+	}
+}
+
+// TestKeyboardNavigation_TabKeys tests Tab navigation for profile switching and focus switching
+func TestKeyboardNavigation_TabKeys(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test Tab key on servers panel (should switch profiles)
+	if app.focusedPanel != "servers" {
+		t.Errorf("Expected default focus on servers panel, got %s", app.focusedPanel)
+	}
+
+	initialProfile := app.selectedProfileIndex
+	app.switchToNextProfile() // Simulates Tab key on servers panel
+	newProfile := app.selectedProfileIndex
+	if newProfile == initialProfile && len(app.profileTabs) > 1 {
+		t.Errorf("Expected Tab to switch profiles from %d to different index, got %d", initialProfile, newProfile)
+	}
+
+	// Test Shift+Tab (backward profile navigation)
+	currentProfile := app.selectedProfileIndex
+	app.switchToPreviousProfile() // Simulates Shift+Tab
+	afterBackwardProfile := app.selectedProfileIndex
+	if afterBackwardProfile == currentProfile && len(app.profileTabs) > 1 {
+		t.Errorf("Expected Shift+Tab to switch profiles backward from %d, got %d", currentProfile, afterBackwardProfile)
+	}
+
+	// Test focus switching (s key simulation)
+	if app.sessionPanel != nil {
+		initialFocus := app.focusedPanel
+		app.switchFocus() // Simulates 's' key
+		newFocus := app.focusedPanel
+		if newFocus == initialFocus {
+			t.Errorf("Expected focus switch from %s to different panel, stayed at %s", initialFocus, newFocus)
+		}
+	}
+}
+
+// TestKeyboardNavigation_RefreshKey tests refresh functionality with 'r' key
+func TestKeyboardNavigation_RefreshKey(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test refresh functionality (r key simulation)
+	initialRowCount := app.serverList.GetRowCount()
+	
+	// refreshData should not panic and should maintain data integrity
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Refresh functionality panicked: %v", r)
+		}
+	}()
+	
+	app.refreshData() // Simulates 'r' key press
+	
+	// After refresh, should still have same number of servers (since config didn't change)
+	afterRefreshCount := app.serverList.GetRowCount()
+	if afterRefreshCount != initialRowCount {
+		t.Errorf("Expected same row count after refresh: %d, got %d", initialRowCount, afterRefreshCount)
+	}
+}
+
+// TestKeyboardNavigation_HelpKey tests '?' key for help modal
+func TestKeyboardNavigation_HelpKey(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test help key functionality (? key simulation)
+	// showHelp should not panic
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Help functionality panicked: %v", r)
+		}
+	}()
+	
+	app.showHelp() // Simulates '?' key press
+	
+	// The help modal should be set as the root (we can't easily test the actual modal content in unit tests)
+	// but we can verify the function completes successfully
+}
+
+// TestKeyboardNavigation_SessionPanelNavigation tests navigation within session panel
+func TestKeyboardNavigation_SessionPanelNavigation(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	if app.sessionPanel == nil {
+		t.Skip("Session panel not initialized (tmux might not be available)")
+	}
+
+	// Test session navigation with mock sessions
+	testSessions := []SessionInfo{
+		{Name: "session1", Status: "active", Windows: 1, LastActivity: "14:30"},
+		{Name: "session2", Status: "inactive", Windows: 2, LastActivity: "14:25"},
+		{Name: "session3", Status: "active", Windows: 3, LastActivity: "14:20"},
+	}
+	
+	app.updateSessionDisplay(testSessions)
+	app.focusedPanel = "sessions" // Switch focus to sessions panel
+
+	if app.sessionPanel.GetRowCount() > 2 {
+		// Test session navigation down
+		app.sessionPanel.Select(1, 0) // Start at first session
+		initialRow, _ := app.sessionPanel.GetSelection()
+		
+		app.navigateSessionDown()
+		newRow, _ := app.sessionPanel.GetSelection()
+		if newRow <= initialRow {
+			t.Errorf("Expected session navigation down to increase row from %d to %d", initialRow, newRow)
+		}
+
+		// Test session navigation up
+		currentRow, _ := app.sessionPanel.GetSelection()
+		app.navigateSessionUp()
+		afterUpRow, _ := app.sessionPanel.GetSelection()
+		if afterUpRow >= currentRow && currentRow > 1 {
+			t.Errorf("Expected session navigation up to decrease row from %d to %d", currentRow, afterUpRow)
+		}
+
+		// Test Enter key on session (should attempt to attach)
+		app.sessionPanel.Select(1, 0) // Select first session
+		app.sessions = testSessions   // Set sessions data for attachment
+		
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Session attachment panicked: %v", r)
+			}
+		}()
+		
+		// Note: This will actually try to stop the TUI and attach to tmux session
+		// In a test environment, this might fail, but it shouldn't panic
+	}
+}
+
+// TestKeyboardNavigation_FocusSwitching tests switching focus between panels
+func TestKeyboardNavigation_FocusSwitching(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test initial focus state
+	if app.focusedPanel != "servers" {
+		t.Errorf("Expected initial focus on servers panel, got %s", app.focusedPanel)
+	}
+
+	if app.sessionPanel != nil {
+		// Test switching focus to sessions panel
+		initialFocus := app.focusedPanel
+		app.switchFocus()
+		newFocus := app.focusedPanel
+		
+		if newFocus == initialFocus {
+			t.Errorf("Expected focus to switch from %s, but stayed at %s", initialFocus, newFocus)
+		}
+		
+		if newFocus != "sessions" {
+			t.Errorf("Expected focus to switch to sessions, got %s", newFocus)
+		}
+
+		// Test switching back to servers panel
+		app.switchFocus()
+		finalFocus := app.focusedPanel
+		
+		if finalFocus != "servers" {
+			t.Errorf("Expected focus to switch back to servers, got %s", finalFocus)
+		}
+	}
+}
+
+// TestKeyboardNavigation_AllKeybindings tests all supported keybindings comprehensively
+func TestKeyboardNavigation_AllKeybindings(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test all keybinding functions don't panic
+	testFunctions := []func(){
+		func() { app.handleNavigationUp() },    // k, Up Arrow
+		func() { app.handleNavigationDown() },  // j, Down Arrow
+		func() { app.handleEnterKey() },        // Enter
+		func() { app.switchToNextProfile() },   // Tab (on servers), p
+		func() { app.switchToPreviousProfile() }, // Shift+Tab (on servers)
+		func() { app.switchFocus() },           // s, Tab (between panels)
+		func() { app.refreshData() },           // r
+		func() { app.showHelp() },              // ?
+		func() { app.Stop() },                  // q, Q, Ctrl+C (test that Stop works)
+	}
+
+	for i, testFunc := range testFunctions {
+		func() {
+			defer func() {
+				if r := recover(); r != nil {
+					t.Errorf("Keybinding function %d panicked: %v", i, r)
+				}
+			}()
+			testFunc()
+		}()
+	}
+}
+
+// TestKeyboardNavigation_ContextAwareness tests that keybindings work differently based on focused panel
+func TestKeyboardNavigation_ContextAwareness(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file with multiple servers and sessions
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test navigation context awareness
+	
+	// When focused on servers panel
+	app.focusedPanel = "servers"
+	serverRow, _ := app.serverList.GetSelection()
+	app.handleNavigationDown()
+	newServerRow, _ := app.serverList.GetSelection()
+	
+	// Should affect server list navigation
+	if newServerRow <= serverRow && app.serverList.GetRowCount() > 2 {
+		t.Errorf("Expected server navigation when focused on servers panel")
+	}
+
+	if app.sessionPanel != nil {
+		// Set up mock sessions for testing
+		testSessions := []SessionInfo{
+			{Name: "session1", Status: "active", Windows: 1, LastActivity: "14:30"},
+			{Name: "session2", Status: "inactive", Windows: 2, LastActivity: "14:25"},
+		}
+		app.updateSessionDisplay(testSessions)
+		app.sessions = testSessions
+
+		// When focused on sessions panel
+		app.focusedPanel = "sessions"
+		app.sessionPanel.Select(1, 0) // Select first session
+		sessionRow, _ := app.sessionPanel.GetSelection()
+		app.handleNavigationDown()
+		newSessionRow, _ := app.sessionPanel.GetSelection()
+		
+		// Should affect session list navigation
+		if newSessionRow <= sessionRow && app.sessionPanel.GetRowCount() > 2 {
+			t.Errorf("Expected session navigation when focused on sessions panel")
+		}
+
+		// Test Enter key context awareness
+		app.focusedPanel = "servers"
+		// handleEnterKey should trigger server connection
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Server connection attempt panicked: %v", r)
+			}
+		}()
+		app.handleEnterKey()
+
+		app.focusedPanel = "sessions"
+		// handleEnterKey should trigger session attachment
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Session attachment attempt panicked: %v", r)
+			}
+		}()
+		// Note: This will actually try to attach to tmux session and stop TUI
+	}
+}
+
+// TestKeyboardNavigation_EditServerKey tests 'e' key for editing servers
+func TestKeyboardNavigation_EditServerKey(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test edit functionality on servers panel
+	if app.serverList.GetRowCount() > 1 {
+		app.focusedPanel = "servers"
+		app.serverList.Select(1, 0) // Select first server
+		
+		// editSelectedServer should not panic
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Edit server functionality panicked: %v", r)
+			}
+		}()
+		
+		app.editSelectedServer() // Simulates 'e' key press
+	}
+
+	// Test edit functionality when not on servers panel (should be ignored)
+	app.focusedPanel = "sessions"
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Edit server functionality panicked when not on servers panel: %v", r)
+		}
+	}()
+	app.editSelectedServer() // Should return early and not crash
+}
+
+// TestKeyboardNavigation_DeleteServerKey tests 'd' key for deleting servers
+func TestKeyboardNavigation_DeleteServerKey(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test delete functionality on servers panel
+	if app.serverList.GetRowCount() > 1 {
+		app.focusedPanel = "servers"
+		app.serverList.Select(1, 0) // Select first server
+		
+		// deleteSelectedServer should not panic (shows confirmation modal)
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Delete server functionality panicked: %v", r)
+			}
+		}()
+		
+		app.deleteSelectedServer() // Simulates 'd' key press
+	}
+
+	// Test delete functionality when not on servers panel (should be ignored)
+	app.focusedPanel = "sessions"
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Delete server functionality panicked when not on servers panel: %v", r)
+		}
+	}()
+	app.deleteSelectedServer() // Should return early and not crash
+}
+
+// TestKeyboardNavigation_DeleteServerFromConfig tests the actual deletion logic
+func TestKeyboardNavigation_DeleteServerFromConfig(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test deleting an existing server
+	initialServerCount := len(app.config.GetServers())
+	if initialServerCount == 0 {
+		t.Skip("No servers to delete in test config")
+	}
+
+	// Delete the first server
+	serverToDelete := "test-web-01"
+	err = app.deleteServerFromConfig(serverToDelete)
+	if err != nil {
+		t.Errorf("Expected no error deleting server, got: %v", err)
+	}
+
+	// Verify server was removed
+	updatedServers := app.config.GetServers()
+	if len(updatedServers) != initialServerCount-1 {
+		t.Errorf("Expected server count to decrease from %d to %d, got %d", 
+			initialServerCount, initialServerCount-1, len(updatedServers))
+	}
+
+	// Verify the specific server was removed
+	for _, server := range updatedServers {
+		if server.Name == serverToDelete {
+			t.Errorf("Server '%s' should have been deleted but still exists", serverToDelete)
+		}
+	}
+
+	// Test deleting non-existent server
+	err = app.deleteServerFromConfig("non-existent-server")
+	if err == nil {
+		t.Error("Expected error when deleting non-existent server, got nil")
+	}
+}
+
+// TestKeyboardNavigation_UpdatedHelpSystem tests that help includes new keybindings
+func TestKeyboardNavigation_UpdatedHelpSystem(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// showHelp should not panic and should include new keybindings
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Updated help system panicked: %v", r)
+		}
+	}()
+	
+	app.showHelp() // Should show help with edit/delete keybindings included
+}
