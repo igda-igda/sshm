@@ -809,3 +809,285 @@ func TestProfileNavigator_BackwardNavigation(t *testing.T) {
 		t.Errorf("Expected profile index to be %d after backward navigation, got %d", expectedIndex, app.selectedProfileIndex)
 	}
 }
+
+// TestSessionManager_Creation tests the creation and initialization of session manager
+func TestSessionManager_Creation(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Session panel should be initialized if tmux is available
+	if app.sessionPanel != nil {
+		// Verify session table structure
+		if app.sessionPanel.GetRowCount() < 1 {
+			t.Error("Expected session panel to have at least header row")
+		}
+
+		// Check header row exists
+		nameHeader := app.sessionPanel.GetCell(0, 0)
+		if nameHeader == nil || nameHeader.Text != "Session" {
+			t.Errorf("Expected session header 'Session', got %v", nameHeader)
+		}
+
+		statusHeader := app.sessionPanel.GetCell(0, 1)
+		if statusHeader == nil || statusHeader.Text != "Status" {
+			t.Errorf("Expected status header 'Status', got %v", statusHeader)
+		}
+
+		windowsHeader := app.sessionPanel.GetCell(0, 2)
+		if windowsHeader == nil || windowsHeader.Text != "Windows" {
+			t.Errorf("Expected windows header 'Windows', got %v", windowsHeader)
+		}
+
+		activeHeader := app.sessionPanel.GetCell(0, 3)
+		if activeHeader == nil || activeHeader.Text != "Last Activity" {
+			t.Errorf("Expected activity header 'Last Activity', got %v", activeHeader)
+		}
+	}
+}
+
+// TestSessionManager_TmuxDetection tests tmux session detection and parsing
+func TestSessionManager_TmuxDetection(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test session parsing with mock data
+	mockSessions := []SessionInfo{
+		{
+			Name:         "test-server-01",
+			Status:       "active",
+			Windows:      3,
+			LastActivity: "2024-08-19 14:30:00",
+		},
+		{
+			Name:         "dev-profile",
+			Status:       "active",
+			Windows:      5,
+			LastActivity: "2024-08-19 14:25:00",
+		},
+	}
+
+	// Test parseTmuxSessions function
+	sessions := app.parseTmuxSessions("test-server-01 3 active 2024-08-19 14:30:00\ndev-profile 5 active 2024-08-19 14:25:00\n")
+	
+	if len(sessions) != 2 {
+		t.Errorf("Expected 2 parsed sessions, got %d", len(sessions))
+	}
+
+	// Verify first session details
+	if len(sessions) > 0 {
+		if sessions[0].Name != "test-server-01" {
+			t.Errorf("Expected first session name 'test-server-01', got '%s'", sessions[0].Name)
+		}
+		if sessions[0].Windows != 3 {
+			t.Errorf("Expected first session windows 3, got %d", sessions[0].Windows)
+		}
+		if sessions[0].Status != "active" {
+			t.Errorf("Expected first session status 'active', got '%s'", sessions[0].Status)
+		}
+	}
+
+	// Test session display update
+	app.updateSessionDisplay(mockSessions)
+	
+	// Verify sessions are displayed in table (header + data rows)
+	expectedRows := len(mockSessions) + 1
+	if app.sessionPanel != nil && app.sessionPanel.GetRowCount() != expectedRows {
+		t.Errorf("Expected %d rows in session panel, got %d", expectedRows, app.sessionPanel.GetRowCount())
+	}
+}
+
+// TestSessionManager_SessionDisplay tests the visual display of session information
+func TestSessionManager_SessionDisplay(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test with sample session data
+	testSessions := []SessionInfo{
+		{
+			Name:         "web-server",
+			Status:       "active",
+			Windows:      2,
+			LastActivity: "14:30",
+		},
+		{
+			Name:         "db-server",
+			Status:       "attached",
+			Windows:      1,
+			LastActivity: "14:25",
+		},
+	}
+
+	// Update session display
+	app.updateSessionDisplay(testSessions)
+
+	if app.sessionPanel == nil {
+		t.Skip("Session panel not initialized (tmux might not be available)")
+	}
+
+	// Verify table has correct number of rows (header + sessions)
+	expectedRows := len(testSessions) + 1
+	actualRows := app.sessionPanel.GetRowCount()
+	if actualRows != expectedRows {
+		t.Errorf("Expected %d rows in session panel, got %d", expectedRows, actualRows)
+	}
+
+	// Verify first session data row
+	if actualRows > 1 {
+		nameCell := app.sessionPanel.GetCell(1, 0)
+		if nameCell == nil || nameCell.Text != "web-server" {
+			t.Errorf("Expected first session name 'web-server', got %v", nameCell)
+		}
+
+		statusCell := app.sessionPanel.GetCell(1, 1)
+		if statusCell == nil || statusCell.Text != "active" {
+			t.Errorf("Expected first session status 'active', got %v", statusCell)
+		}
+
+		windowsCell := app.sessionPanel.GetCell(1, 2)
+		if windowsCell == nil || windowsCell.Text != "2" {
+			t.Errorf("Expected first session windows '2', got %v", windowsCell)
+		}
+
+		activityCell := app.sessionPanel.GetCell(1, 3)
+		if activityCell == nil || activityCell.Text != "14:30" {
+			t.Errorf("Expected first session activity '14:30', got %v", activityCell)
+		}
+	}
+}
+
+// TestSessionManager_EmptySessionList tests handling of empty session list
+func TestSessionManager_EmptySessionList(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test with empty session list
+	emptySessions := []SessionInfo{}
+
+	// Update session display
+	app.updateSessionDisplay(emptySessions)
+
+	if app.sessionPanel == nil {
+		t.Skip("Session panel not initialized (tmux might not be available)")
+	}
+
+	// Should only have header row
+	actualRows := app.sessionPanel.GetRowCount()
+	if actualRows != 1 {
+		t.Errorf("Expected 1 row (header only) for empty sessions, got %d", actualRows)
+	}
+}
+
+// TestSessionManager_SessionRefresh tests session refresh functionality
+func TestSessionManager_SessionRefresh(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	if app.sessionPanel == nil {
+		t.Skip("Session panel not initialized (tmux might not be available)")
+	}
+
+	// Store initial row count
+	initialRows := app.sessionPanel.GetRowCount()
+
+	// Call refresh session functionality
+	err = app.refreshSessions()
+	if err != nil {
+		t.Logf("Session refresh returned error (expected if tmux not available): %v", err)
+	}
+
+	// Verify refresh didn't break the display
+	currentRows := app.sessionPanel.GetRowCount()
+	if currentRows < 1 {
+		t.Error("Expected at least header row after session refresh")
+	}
+
+	// Row count might change if sessions were added/removed, but should be >= 1
+	if currentRows < initialRows && initialRows == 1 {
+		t.Errorf("Session panel lost header row during refresh")
+	}
+}
+
+// TestSessionManager_SessionSelection tests session selection and highlighting
+func TestSessionManager_SessionSelection(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test with sample session data
+	testSessions := []SessionInfo{
+		{Name: "session1", Status: "active", Windows: 1, LastActivity: "14:30"},
+		{Name: "session2", Status: "inactive", Windows: 2, LastActivity: "14:25"},
+		{Name: "session3", Status: "active", Windows: 3, LastActivity: "14:20"},
+	}
+
+	// Update session display
+	app.updateSessionDisplay(testSessions)
+
+	if app.sessionPanel == nil {
+		t.Skip("Session panel not initialized (tmux might not be available)")
+	}
+
+	// Test session navigation (if we have multiple sessions)
+	if app.sessionPanel.GetRowCount() > 2 {
+		// Test selecting first session
+		app.sessionPanel.Select(1, 0) // First data row
+		selectedRow, _ := app.sessionPanel.GetSelection()
+		if selectedRow != 1 {
+			t.Errorf("Expected selected row to be 1, got %d", selectedRow)
+		}
+
+		// Test selecting second session
+		app.sessionPanel.Select(2, 0) // Second data row
+		selectedRow, _ = app.sessionPanel.GetSelection()
+		if selectedRow != 2 {
+			t.Errorf("Expected selected row to be 2, got %d", selectedRow)
+		}
+	}
+}
