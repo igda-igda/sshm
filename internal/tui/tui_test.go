@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"strings"
 	"testing"
 	"time"
 
@@ -430,8 +431,8 @@ func TestServerList_ProfileFiltering(t *testing.T) {
 		t.Errorf("Expected 4 rows initially (3 servers + header), got %d", initialRowCount)
 	}
 
-	// Toggle to first profile (development)
-	app.toggleProfileFilter()
+	// Switch to first profile (development)
+	app.switchToNextProfile()
 	
 	// Should show only 1 server from development profile + header
 	filteredRowCount := app.serverList.GetRowCount()
@@ -447,8 +448,8 @@ func TestServerList_ProfileFiltering(t *testing.T) {
 		}
 	}
 
-	// Toggle to production profile
-	app.toggleProfileFilter()
+	// Switch to production profile
+	app.switchToNextProfile()
 	
 	// Should show only 1 server from production profile + header
 	filteredRowCount = app.serverList.GetRowCount()
@@ -464,9 +465,9 @@ func TestServerList_ProfileFiltering(t *testing.T) {
 		}
 	}
 
-	// Toggle back to all servers
-	app.toggleProfileFilter() // staging
-	app.toggleProfileFilter() // back to all
+	// Switch back to all servers
+	app.switchToNextProfile() // staging
+	app.switchToNextProfile() // back to all
 	
 	// Should show all servers again
 	finalRowCount := app.serverList.GetRowCount()
@@ -500,5 +501,311 @@ func TestServerList_EmptyNavigation(t *testing.T) {
 	currentRow, _ = app.serverList.GetSelection()
 	if currentRow != initialRow {
 		t.Errorf("Selection changed during navigation on empty list: initial=%d, current=%d", initialRow, currentRow)
+	}
+}
+
+// TestProfileNavigator_Creation tests the creation and initialization of profile navigator
+func TestProfileNavigator_Creation(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Profile navigator should be initialized
+	if app.profileNavigator == nil {
+		t.Fatal("Expected profile navigator to be initialized")
+	}
+
+	// Should display tabs for all profiles plus "All" tab
+	expectedTabs := 4 // "All" + development, production, staging
+	if len(app.profileTabs) != expectedTabs {
+		t.Errorf("Expected %d profile tabs, got %d", expectedTabs, len(app.profileTabs))
+	}
+
+	// First tab should be "All" and should be selected by default
+	if app.selectedProfileIndex != 0 {
+		t.Errorf("Expected 'All' tab to be selected by default (index 0), got %d", app.selectedProfileIndex)
+	}
+
+	if app.profileTabs[0] != "All" {
+		t.Errorf("Expected first tab to be 'All', got '%s'", app.profileTabs[0])
+	}
+}
+
+// TestProfileNavigator_TabDisplay tests the visual display of profile tabs
+func TestProfileNavigator_TabDisplay(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test tab display text generation
+	tabText := app.renderProfileTabs()
+	
+	// Should contain all profile names
+	expectedProfiles := []string{"All", "development", "production", "staging"}
+	for _, profile := range expectedProfiles {
+		if !strings.Contains(tabText, profile) {
+			t.Errorf("Expected tab display to contain '%s', got: %s", profile, tabText)
+		}
+	}
+
+	// Should highlight the selected tab (All should be highlighted by default)
+	if !strings.Contains(tabText, "[aqua][All][white]") {
+		t.Errorf("Expected 'All' tab to be highlighted in tab display, got: %s", tabText)
+	}
+}
+
+// TestProfileNavigator_SwitchingWithTab tests profile switching using Tab key
+func TestProfileNavigator_SwitchingWithTab(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Initially should be on "All" tab (index 0)
+	if app.selectedProfileIndex != 0 {
+		t.Errorf("Expected initial profile index to be 0, got %d", app.selectedProfileIndex)
+	}
+
+	// Switch to next profile using Tab navigation
+	app.switchToNextProfile()
+	if app.selectedProfileIndex != 1 {
+		t.Errorf("Expected profile index to be 1 after switching, got %d", app.selectedProfileIndex)
+	}
+
+	// Should now be showing development profile
+	if app.profileTabs[app.selectedProfileIndex] != "development" {
+		t.Errorf("Expected current profile to be 'development', got '%s'", app.profileTabs[app.selectedProfileIndex])
+	}
+
+	// Continue switching through all profiles
+	app.switchToNextProfile() // production
+	if app.selectedProfileIndex != 2 {
+		t.Errorf("Expected profile index to be 2, got %d", app.selectedProfileIndex)
+	}
+
+	app.switchToNextProfile() // staging  
+	if app.selectedProfileIndex != 3 {
+		t.Errorf("Expected profile index to be 3, got %d", app.selectedProfileIndex)
+	}
+
+	// Should cycle back to "All"
+	app.switchToNextProfile()
+	if app.selectedProfileIndex != 0 {
+		t.Errorf("Expected profile index to cycle back to 0, got %d", app.selectedProfileIndex)
+	}
+}
+
+// TestProfileNavigator_SwitchingWithPKey tests profile switching using 'p' key
+func TestProfileNavigator_SwitchingWithPKey(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test 'p' key switching (should behave same as Tab)
+	initialIndex := app.selectedProfileIndex
+
+	app.switchToNextProfile()
+	if app.selectedProfileIndex <= initialIndex {
+		t.Errorf("Expected profile index to increase after 'p' key switch, was %d, now %d", initialIndex, app.selectedProfileIndex)
+	}
+}
+
+// TestProfileNavigator_FilterApplication tests that profile selection filters server list
+func TestProfileNavigator_FilterApplication(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Initially should show all servers (All tab selected)
+	initialRowCount := app.serverList.GetRowCount()
+	if initialRowCount != 4 { // 3 servers + 1 header
+		t.Errorf("Expected 4 rows with all servers shown, got %d", initialRowCount)
+	}
+
+	// Switch to development profile
+	app.switchToProfile(1) // development profile index
+	
+	// Should filter to only development servers + header
+	filteredRowCount := app.serverList.GetRowCount()
+	if filteredRowCount != 2 { // 1 server + 1 header
+		t.Errorf("Expected 2 rows after filtering to development profile, got %d", filteredRowCount)
+	}
+
+	// Verify the correct server is shown
+	if filteredRowCount > 1 {
+		nameCell := app.serverList.GetCell(1, 0)
+		if nameCell == nil || nameCell.Text != "test-web-01" {
+			t.Errorf("Expected development server 'test-web-01', got %v", nameCell)
+		}
+	}
+
+	// Switch to production profile
+	app.switchToProfile(2) // production profile index
+	
+	// Should filter to only production servers + header
+	filteredRowCount = app.serverList.GetRowCount()
+	if filteredRowCount != 2 { // 1 server + 1 header
+		t.Errorf("Expected 2 rows after filtering to production profile, got %d", filteredRowCount)
+	}
+
+	// Verify the correct server is shown
+	if filteredRowCount > 1 {
+		nameCell := app.serverList.GetCell(1, 0)
+		if nameCell == nil || nameCell.Text != "prod-db-01" {
+			t.Errorf("Expected production server 'prod-db-01', got %v", nameCell)
+		}
+	}
+
+	// Switch back to All tab
+	app.switchToProfile(0) // All profile index
+	
+	// Should show all servers again
+	finalRowCount := app.serverList.GetRowCount()
+	if finalRowCount != 4 { // 3 servers + 1 header
+		t.Errorf("Expected 4 rows after switching back to All, got %d", finalRowCount)
+	}
+}
+
+// TestProfileNavigator_EmptyConfiguration tests profile navigator with no profiles configured
+func TestProfileNavigator_EmptyConfiguration(t *testing.T) {
+	// Create a temporary directory for empty test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app with empty config (no profiles)
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Profile navigator should still be initialized but only show "All" tab
+	if app.profileNavigator == nil {
+		t.Fatal("Expected profile navigator to be initialized even with no profiles")
+	}
+
+	// Should only have "All" tab
+	if len(app.profileTabs) != 1 {
+		t.Errorf("Expected 1 profile tab (All only), got %d", len(app.profileTabs))
+	}
+
+	if app.profileTabs[0] != "All" {
+		t.Errorf("Expected only tab to be 'All', got '%s'", app.profileTabs[0])
+	}
+
+	// Profile switching should not change anything with only one tab
+	initialIndex := app.selectedProfileIndex
+	app.switchToNextProfile()
+	if app.selectedProfileIndex != initialIndex {
+		t.Errorf("Profile index should not change with only one tab, was %d, now %d", initialIndex, app.selectedProfileIndex)
+	}
+}
+
+// TestProfileNavigator_BackwardNavigation tests backward navigation with Shift+Tab
+func TestProfileNavigator_BackwardNavigation(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Start at "All" tab (index 0)
+	if app.selectedProfileIndex != 0 {
+		t.Errorf("Expected initial profile index to be 0, got %d", app.selectedProfileIndex)
+	}
+
+	// Move backward (should wrap to last profile)
+	app.switchToPreviousProfile()
+	expectedLastIndex := len(app.profileTabs) - 1
+	if app.selectedProfileIndex != expectedLastIndex {
+		t.Errorf("Expected backward navigation to wrap to last index %d, got %d", expectedLastIndex, app.selectedProfileIndex)
+	}
+
+	// Move backward again
+	app.switchToPreviousProfile()
+	expectedIndex := expectedLastIndex - 1
+	if app.selectedProfileIndex != expectedIndex {
+		t.Errorf("Expected profile index to be %d after backward navigation, got %d", expectedIndex, app.selectedProfileIndex)
 	}
 }

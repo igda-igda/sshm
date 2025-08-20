@@ -3,6 +3,7 @@ package tui
 import (
 	"context"
 	"fmt"
+	"strings"
 	"sync"
 
 	"github.com/gdamore/tcell/v2"
@@ -12,18 +13,21 @@ import (
 
 // TUIApp represents the main TUI application
 type TUIApp struct {
-	app         *tview.Application
-	layout      *tview.Flex
-	serverList  *tview.Table
-	statusBar   *tview.TextView
-	config      *config.Config
+	app              *tview.Application
+	layout           *tview.Flex
+	serverList       *tview.Table
+	profileNavigator *tview.TextView
+	statusBar        *tview.TextView
+	config           *config.Config
 	
 	// Application state
-	running       bool
-	mu            sync.RWMutex
-	stopChan      chan struct{}
-	currentFilter string // Current profile filter, empty means all servers
-	selectedRow   int    // Currently selected row (0 = header, 1+ = data rows)
+	running              bool
+	mu                   sync.RWMutex
+	stopChan             chan struct{}
+	currentFilter        string   // Current profile filter, empty means all servers
+	selectedRow          int      // Currently selected row (0 = header, 1+ = data rows)
+	profileTabs          []string // List of profile tab names including "All"
+	selectedProfileIndex int      // Currently selected profile tab index
 }
 
 // NewTUIApp creates a new TUI application instance
@@ -73,19 +77,80 @@ func (t *TUIApp) setupLayout() error {
 	t.serverList.SetCell(0, 5, tview.NewTableCell("Status").SetTextColor(tcell.ColorYellow).SetSelectable(false).SetAlign(tview.AlignCenter))
 	t.serverList.SetCell(0, 6, tview.NewTableCell("Profile").SetTextColor(tcell.ColorYellow).SetSelectable(false).SetAlign(tview.AlignLeft))
 
-	// Create main layout
-	t.layout = tview.NewFlex().SetDirection(tview.FlexRow)
-	t.layout.
-		AddItem(t.serverList, 0, 1, true).
+	// Create profile navigator
+	t.profileNavigator = tview.NewTextView()
+	t.profileNavigator.SetDynamicColors(true).SetBorder(true).SetTitle(" Profiles ")
+	
+	// Initialize profile tabs
+	t.initializeProfileTabs()
+	
+	// Create right pane with profile navigator (placeholder for future session manager)
+	rightPane := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(t.profileNavigator, 3, 0, false) // Fixed height for profile tabs
+		// AddItem(sessionManager, 0, 1, false) // Future session manager component
+
+	// Create main horizontal layout: left pane (60%) server list, right pane (40%) profiles/sessions
+	mainLayout := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(t.serverList, 0, 6, true).  // 60% width, focusable
+		AddItem(rightPane, 0, 4, false)    // 40% width, not focusable initially
+
+	// Create overall layout with status bar at bottom
+	t.layout = tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(mainLayout, 0, 1, true).
 		AddItem(t.statusBar, 1, 0, false)
 
 	// Set the main layout as root
 	t.app.SetRoot(t.layout, true)
 
-	// Load server data
+	// Load server data and update profile display
 	t.refreshServerList()
+	t.updateProfileDisplay()
 
 	return nil
+}
+
+// initializeProfileTabs initializes the profile tabs list
+func (t *TUIApp) initializeProfileTabs() {
+	profiles := t.config.GetProfiles()
+	
+	// Always start with "All" tab
+	t.profileTabs = []string{"All"}
+	
+	// Add profile names
+	for _, profile := range profiles {
+		t.profileTabs = append(t.profileTabs, profile.Name)
+	}
+	
+	// Initialize selected index to 0 (All tab)
+	t.selectedProfileIndex = 0
+	t.currentFilter = "" // Empty filter means show all servers
+}
+
+// updateProfileDisplay updates the profile navigator display
+func (t *TUIApp) updateProfileDisplay() {
+	tabText := t.renderProfileTabs()
+	t.profileNavigator.SetText(tabText)
+}
+
+// renderProfileTabs generates the tab display text with highlighting
+func (t *TUIApp) renderProfileTabs() string {
+	if len(t.profileTabs) == 0 {
+		return "[white]No profiles configured"
+	}
+	
+	var tabStrings []string
+	for i, tab := range t.profileTabs {
+		if i == t.selectedProfileIndex {
+			// Highlight selected tab
+			tabStrings = append(tabStrings, fmt.Sprintf("[aqua][%s][white]", tab))
+		} else {
+			// Normal tab
+			tabStrings = append(tabStrings, tab)
+		}
+	}
+	
+	// Join tabs with separators
+	return strings.Join(tabStrings, " | ")
 }
 
 // setupKeyBindings configures global key bindings
@@ -104,6 +169,12 @@ func (t *TUIApp) setupKeyBindings() {
 			return nil
 		case tcell.KeyEnter:
 			t.connectToSelectedServer()
+			return nil
+		case tcell.KeyTab:
+			t.switchToNextProfile()
+			return nil
+		case tcell.KeyBacktab: // Shift+Tab
+			t.switchToPreviousProfile()
 			return nil
 		}
 		
@@ -125,7 +196,7 @@ func (t *TUIApp) setupKeyBindings() {
 			t.refreshData()
 			return nil
 		case 'p', 'P':
-			t.toggleProfileFilter()
+			t.switchToNextProfile()
 			return nil
 		}
 		
@@ -207,41 +278,55 @@ func (t *TUIApp) refreshData() {
 	}
 }
 
-// toggleProfileFilter cycles through available profile filters
-func (t *TUIApp) toggleProfileFilter() {
-	profiles := t.config.GetProfiles()
-	
-	// Create filter options: "all" + profile names
-	filterOptions := []string{"all"}
-	for _, profile := range profiles {
-		filterOptions = append(filterOptions, profile.Name)
+// switchToNextProfile switches to the next profile tab
+func (t *TUIApp) switchToNextProfile() {
+	if len(t.profileTabs) <= 1 {
+		return // No switching needed with only one tab
 	}
 	
-	if len(filterOptions) <= 1 {
-		return // No profiles to filter by
+	t.selectedProfileIndex = (t.selectedProfileIndex + 1) % len(t.profileTabs)
+	t.updateFilterFromProfile()
+	t.updateProfileDisplay()
+	t.refreshServerList()
+}
+
+// switchToPreviousProfile switches to the previous profile tab
+func (t *TUIApp) switchToPreviousProfile() {
+	if len(t.profileTabs) <= 1 {
+		return // No switching needed with only one tab
 	}
 	
-	// Find current filter index
-	currentIndex := 0
-	for i, filter := range filterOptions {
-		if filter == t.currentFilter || (t.currentFilter == "" && filter == "all") {
-			currentIndex = i
-			break
-		}
+	t.selectedProfileIndex = (t.selectedProfileIndex - 1 + len(t.profileTabs)) % len(t.profileTabs)
+	t.updateFilterFromProfile()
+	t.updateProfileDisplay()
+	t.refreshServerList()
+}
+
+// switchToProfile switches to a specific profile by index
+func (t *TUIApp) switchToProfile(index int) {
+	if index < 0 || index >= len(t.profileTabs) {
+		return // Invalid index
 	}
 	
-	// Move to next filter
-	nextIndex := (currentIndex + 1) % len(filterOptions)
-	nextFilter := filterOptions[nextIndex]
+	t.selectedProfileIndex = index
+	t.updateFilterFromProfile()
+	t.updateProfileDisplay()
+	t.refreshServerList()
+}
+
+// updateFilterFromProfile updates the currentFilter based on selected profile
+func (t *TUIApp) updateFilterFromProfile() {
+	if t.selectedProfileIndex >= len(t.profileTabs) {
+		t.currentFilter = ""
+		return
+	}
 	
-	if nextFilter == "all" {
+	selectedTab := t.profileTabs[t.selectedProfileIndex]
+	if selectedTab == "All" {
 		t.currentFilter = ""
 	} else {
-		t.currentFilter = nextFilter
+		t.currentFilter = selectedTab
 	}
-	
-	// Refresh the display
-	t.refreshServerList()
 }
 
 // refreshServerList loads server data into the table with optional profile filtering
@@ -345,10 +430,11 @@ Actions:
   q           Quit application
   ?           Show this help
   r           Refresh data
-  p           Toggle profile filter
   
-Filtering:
-  p           Cycle through profile filters (all -> profile1 -> profile2 -> ...)
+Profile Navigation:
+  Tab         Switch to next profile
+  Shift+Tab   Switch to previous profile
+  p           Switch to next profile
   
 Mouse support: Click to select servers`
 
@@ -431,6 +517,8 @@ func (t *TUIApp) RefreshConfig() error {
 	}
 	
 	t.config = cfg
+	t.initializeProfileTabs()
+	t.updateProfileDisplay()
 	t.refreshServerList()
 	
 	return nil
