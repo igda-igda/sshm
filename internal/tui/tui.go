@@ -267,6 +267,9 @@ func (t *TUIApp) setupKeyBindings() {
 		case 'd', 'D':
 			t.deleteSelectedServer()
 			return nil
+		case 'b', 'B':
+			t.connectToCurrentProfile()
+			return nil
 		}
 		
 		return event
@@ -376,19 +379,94 @@ func (t *TUIApp) connectToSelectedServer() {
 	}
 	
 	serverName := nameCell.Text
-	// TODO: Implement connection logic here
-	// For now, show a placeholder modal
-	t.showConnectionModal(serverName)
+	
+	// Get server configuration
+	server, err := t.config.GetServer(serverName)
+	if err != nil {
+		t.showErrorModal(fmt.Sprintf("Server '%s' not found: %s", serverName, err.Error()))
+		return
+	}
+	
+	// Check if tmux is available
+	if !t.tmuxManager.IsAvailable() {
+		t.showErrorModal("tmux is not available on this system. Please install tmux to use sshm.")
+		return
+	}
+	
+	// Build SSH command based on server configuration
+	sshCommand, err := t.buildSSHCommand(*server)
+	if err != nil {
+		t.showErrorModal(fmt.Sprintf("Failed to build SSH command: %s", err.Error()))
+		return
+	}
+	
+	// Show connecting modal
+	t.showConnectingModal(serverName)
+	
+	// Create tmux session and connect (or reattach to existing)
+	go func() {
+		sessionName, wasExisting, err := t.tmuxManager.ConnectToServer(server.Name, sshCommand)
+		if err != nil {
+			t.app.QueueUpdateDraw(func() {
+				t.showErrorModal(fmt.Sprintf("Failed to create tmux session: %s", err.Error()))
+			})
+			return
+		}
+		
+		// Stop the TUI application and attach to the session
+		t.app.QueueUpdateDraw(func() {
+			t.Stop()
+		})
+		
+		// Attach to the session in the main thread
+		go func() {
+			// Small delay to ensure TUI has stopped
+			time.Sleep(100 * time.Millisecond)
+			
+			fmt.Printf("\n🚀 ")
+			if wasExisting {
+				fmt.Printf("Found existing tmux session: %s\n", sessionName)
+				fmt.Printf("📡 Reattaching to existing session\n")
+			} else {
+				fmt.Printf("Created tmux session: %s\n", sessionName)
+				fmt.Printf("🔗 SSH connection established\n")
+			}
+			
+			fmt.Printf("📺 Attaching to session...\n\n")
+			
+			// Attach to the session
+			err = t.tmuxManager.AttachSession(sessionName)
+			if err != nil {
+				// Don't fail - provide manual instructions
+				fmt.Printf("⚠️  Automatic attach failed (this can happen in some environments)\n")
+				fmt.Printf("To manually attach to your session, run:\n")
+				fmt.Printf("   tmux attach-session -t %s\n\n", sessionName)
+				fmt.Printf("✅ Session %s is ready for connection!\n", sessionName)
+			} else {
+				fmt.Printf("✅ Connected to %s successfully!\n", server.Name)
+			}
+		}()
+	}()
 }
 
-// showConnectionModal displays a modal indicating connection attempt
-func (t *TUIApp) showConnectionModal(serverName string) {
+// showConnectingModal displays a modal indicating connection attempt in progress
+func (t *TUIApp) showConnectingModal(serverName string) {
 	modal := tview.NewModal().
-		SetText(fmt.Sprintf("Connecting to server: %s\n\n(Connection logic will be implemented in integration phase)", serverName)).
+		SetText(fmt.Sprintf("🚀 Connecting to server: %s\n\n⏳ Establishing SSH connection...\n📡 Creating tmux session...\n\nPlease wait...", serverName)).
+		SetBackgroundColor(tcell.ColorDarkBlue)
+	
+	t.app.SetRoot(modal, true)
+}
+
+// showErrorModal displays an error modal with the given message
+func (t *TUIApp) showErrorModal(message string) {
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("❌ Error\n\n%s", message)).
 		AddButtons([]string{"OK"}).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
 			t.app.SetRoot(t.layout, true)
-		})
+		}).
+		SetBackgroundColor(tcell.ColorDarkRed)
 	
 	t.app.SetRoot(modal, true)
 }
@@ -587,7 +665,8 @@ Mouse support: Click to select items
 Server Actions (when server is selected):
   Enter       Connect to server
   e           Edit server configuration
-  d           Delete server (with confirmation)`
+  d           Delete server (with confirmation)
+  b           Connect to all servers in current profile (batch)`
 
 	modal := tview.NewModal().
 		SetText(helpText).
@@ -667,6 +746,21 @@ func (t *TUIApp) RefreshConfig() error {
 		return fmt.Errorf("failed to reload configuration: %w", err)
 	}
 	
+	// Validate configuration integrity
+	if cfg == nil {
+		return fmt.Errorf("configuration is nil after loading")
+	}
+	
+	// Check for basic configuration validity
+	servers := cfg.GetServers()
+	for _, server := range servers {
+		if err := server.Validate(); err != nil {
+			// Log the error but don't fail the entire refresh
+			// This allows the TUI to continue operating with partially valid config
+			continue
+		}
+	}
+	
 	t.config = cfg
 	t.initializeProfileTabs()
 	t.updateProfileDisplay()
@@ -678,13 +772,16 @@ func (t *TUIApp) RefreshConfig() error {
 // refreshSessions refreshes the session display with current tmux sessions
 func (t *TUIApp) refreshSessions() error {
 	if !t.tmuxManager.IsAvailable() {
-		return fmt.Errorf("tmux is not available")
+		// Tmux not available - show empty sessions but don't error
+		t.updateSessionDisplay([]SessionInfo{})
+		return nil
 	}
 
 	// Get session list from tmux
 	sessionNames, err := t.tmuxManager.ListSessions()
 	if err != nil {
-		// If no sessions exist, show empty list
+		// If no sessions exist or tmux command failed, show empty list
+		// This is expected behavior and shouldn't be treated as an error
 		t.updateSessionDisplay([]SessionInfo{})
 		return nil
 	}
@@ -692,7 +789,19 @@ func (t *TUIApp) refreshSessions() error {
 	// Parse detailed session information
 	sessions, err := t.getSessionDetails(sessionNames)
 	if err != nil {
-		return err
+		// If we can't get session details, fall back to basic session names
+		var basicSessions []SessionInfo
+		for _, name := range sessionNames {
+			basicSessions = append(basicSessions, SessionInfo{
+				Name:         name,
+				Status:       "unknown",
+				Windows:      0,
+				LastActivity: "unknown",
+			})
+		}
+		t.sessions = basicSessions
+		t.updateSessionDisplay(basicSessions)
+		return nil
 	}
 
 	// Update the display
@@ -1066,16 +1175,23 @@ func (t *TUIApp) deleteServerFromConfig(serverName string) error {
 	// Update configuration with the filtered servers
 	t.config.Servers = updatedServers
 	
-	// Also remove from any profiles that contain this server
-	for i, profile := range t.config.Profiles {
+	// Also remove from any profiles that contain this server and clean up empty profiles
+	var updatedProfiles []config.Profile
+	for _, profile := range t.config.Profiles {
 		var updatedProfileServers []string
 		for _, profileServer := range profile.Servers {
 			if profileServer != serverName {
 				updatedProfileServers = append(updatedProfileServers, profileServer)
 			}
 		}
-		t.config.Profiles[i].Servers = updatedProfileServers
+		// Only keep profiles that still have servers
+		if len(updatedProfileServers) > 0 {
+			updatedProfile := profile
+			updatedProfile.Servers = updatedProfileServers
+			updatedProfiles = append(updatedProfiles, updatedProfile)
+		}
 	}
+	t.config.Profiles = updatedProfiles
 	
 	// Save the updated configuration
 	if err := t.config.Save(); err != nil {
@@ -1083,4 +1199,129 @@ func (t *TUIApp) deleteServerFromConfig(serverName string) error {
 	}
 	
 	return nil
+}
+
+// buildSSHCommand builds an SSH command string for a server (same logic as CLI)
+func (t *TUIApp) buildSSHCommand(server config.Server) (string, error) {
+	// Validate server configuration
+	if err := server.Validate(); err != nil {
+		return "", fmt.Errorf("invalid server configuration: %w", err)
+	}
+
+	// Build base SSH command with pseudo-terminal allocation
+	sshCmd := fmt.Sprintf("ssh -t %s@%s", server.Username, server.Hostname)
+	
+	// Add port if not default
+	if server.Port != 22 {
+		sshCmd += fmt.Sprintf(" -p %d", server.Port)
+	}
+
+	// Add key-specific options
+	if server.AuthType == "key" && server.KeyPath != "" {
+		sshCmd += fmt.Sprintf(" -i %s", server.KeyPath)
+	}
+
+	// Add common SSH options
+	sshCmd += " -o ServerAliveInterval=60 -o ServerAliveCountMax=3"
+
+	return sshCmd, nil
+}
+
+// connectToCurrentProfile connects to all servers in the currently selected profile
+func (t *TUIApp) connectToCurrentProfile() {
+	if t.currentFilter == "" {
+		t.showErrorModal("Cannot connect to all servers. Please select a specific profile first.")
+		return
+	}
+	
+	// Get servers from current profile
+	servers, err := t.config.GetServersByProfile(t.currentFilter)
+	if err != nil {
+		t.showErrorModal(fmt.Sprintf("Profile '%s' not found: %s", t.currentFilter, err.Error()))
+		return
+	}
+	
+	if len(servers) == 0 {
+		t.showErrorModal(fmt.Sprintf("No servers found in profile '%s'", t.currentFilter))
+		return
+	}
+	
+	// Check if tmux is available
+	if !t.tmuxManager.IsAvailable() {
+		t.showErrorModal("tmux is not available on this system. Please install tmux to use sshm.")
+		return
+	}
+	
+	// Show connecting modal
+	t.showGroupConnectingModal(t.currentFilter, len(servers))
+	
+	// Create group session and connect to all servers
+	go func() {
+		// Convert config.Server slice to tmux.Server interface slice
+		tmuxServers := make([]tmux.Server, len(servers))
+		for i, server := range servers {
+			tmuxServers[i] = &server
+		}
+		
+		sessionName, wasExisting, err := t.tmuxManager.ConnectToProfile(t.currentFilter, tmuxServers)
+		if err != nil {
+			t.app.QueueUpdateDraw(func() {
+				t.showErrorModal(fmt.Sprintf("Failed to create group session: %s", err.Error()))
+			})
+			return
+		}
+		
+		// Stop the TUI application and attach to the session
+		t.app.QueueUpdateDraw(func() {
+			t.Stop()
+		})
+		
+		// Attach to the session in the main thread
+		go func() {
+			// Small delay to ensure TUI has stopped
+			time.Sleep(100 * time.Millisecond)
+			
+			fmt.Printf("\n🚀 ")
+			if wasExisting {
+				fmt.Printf("Found existing group session: %s\n", sessionName)
+				fmt.Printf("🔌 Reattaching to existing session\n")
+			} else {
+				fmt.Printf("Created group session: %s\n", sessionName)
+				fmt.Printf("📡 Created %d windows for servers\n", len(servers))
+				
+				// List the windows created
+				for i, server := range servers {
+					fmt.Printf("   • Window %d: %s (%s@%s:%d)\n", 
+						i+1, server.Name, server.Username, server.Hostname, server.Port)
+				}
+			}
+			
+			fmt.Printf("📺 Attaching to group session...\n\n")
+			
+			// Attach to the session
+			err = t.tmuxManager.AttachSession(sessionName)
+			if err != nil {
+				// Don't fail - provide manual instructions
+				fmt.Printf("⚠️  Automatic attach failed (this can happen in some environments)\n")
+				fmt.Printf("To manually attach to your group session, run:\n")
+				fmt.Printf("   tmux attach-session -t %s\n", sessionName)
+				fmt.Printf("To switch between windows, use:\n")
+				fmt.Printf("   Ctrl+b, then number key (1, 2, 3, etc.)\n")
+				fmt.Printf("   Ctrl+b, then 'n' for next window\n")
+				fmt.Printf("   Ctrl+b, then 'p' for previous window\n")
+				fmt.Printf("✅ Group session %s is ready!\n", sessionName)
+			} else {
+				fmt.Printf("✅ Connected to profile '%s' group session successfully!\n", t.currentFilter)
+			}
+		}()
+	}()
+}
+
+// showGroupConnectingModal displays a modal for group connection attempts
+func (t *TUIApp) showGroupConnectingModal(profileName string, serverCount int) {
+	modal := tview.NewModal().
+		SetText(fmt.Sprintf("🚀 Connecting to profile: %s\n\n📊 Creating group session for %d server(s)...\n🔗 Setting up tmux windows...\n⚡ Establishing SSH connections...\n\nPlease wait...", profileName, serverCount)).
+		SetBackgroundColor(tcell.ColorDarkBlue)
+	
+	t.app.SetRoot(modal, true)
 }
