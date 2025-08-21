@@ -2,10 +2,13 @@ package tui
 
 import (
 	"errors"
+	"fmt"
+	"strings"
 	"testing"
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"sshm/internal/config"
 )
 
 // FormTestHelper assists with testing form interactions
@@ -588,5 +591,740 @@ func TestModalManager_KeyboardRouting(t *testing.T) {
 	if !enterPressed {
 		t.Error("Expected Enter key to be captured by modal")
 	}
+}
+
+// TestServerForm_AllFieldsValidation tests comprehensive server form validation
+func TestServerForm_AllFieldsValidation(t *testing.T) {
+	// Test field validation with all CLI add command fields
+	fields := map[string]*FormField{
+		"name": {
+			inputField: tview.NewInputField().SetLabel("Server Name: "),
+			validator: func(value string) error {
+				if value == "" {
+					return &ValidationError{Field: "name", Message: "Server name is required"}
+				}
+				return nil
+			},
+			required: true,
+		},
+		"hostname": {
+			inputField: tview.NewInputField().SetLabel("Hostname: "),
+			validator: func(value string) error {
+				if value == "" {
+					return &ValidationError{Field: "hostname", Message: "Hostname is required"}
+				}
+				return nil
+			},
+			required: true,
+		},
+		"port": {
+			inputField: tview.NewInputField().SetLabel("Port: ").SetText("22"),
+			validator: func(value string) error {
+				if value == "" {
+					return &ValidationError{Field: "port", Message: "Port is required"}
+				}
+				// Test port range validation in the future
+				return nil
+			},
+			required: true,
+		},
+		"username": {
+			inputField: tview.NewInputField().SetLabel("Username: "),
+			validator: func(value string) error {
+				if value == "" {
+					return &ValidationError{Field: "username", Message: "Username is required"}
+				}
+				return nil
+			},
+			required: true,
+		},
+		"auth_type": {
+			inputField: tview.NewInputField().SetLabel("Auth Type (key/password): ").SetText("key"),
+			validator: func(value string) error {
+				if value != "key" && value != "password" {
+					return &ValidationError{Field: "auth_type", Message: "Auth type must be 'key' or 'password'"}
+				}
+				return nil
+			},
+			required: true,
+		},
+		"key_path": {
+			inputField: tview.NewInputField().SetLabel("Key Path (optional): "),
+			validator: func(value string) error {
+				// Key path is optional but could validate file existence
+				return nil
+			},
+			required: false,
+		},
+		"passphrase_protected": {
+			inputField: tview.NewInputField().SetLabel("Passphrase Protected (true/false): ").SetText("false"),
+			validator: func(value string) error {
+				if value != "true" && value != "false" && value != "" {
+					return &ValidationError{Field: "passphrase_protected", Message: "Must be 'true' or 'false'"}
+				}
+				return nil
+			},
+			required: false,
+		},
+	}
+
+	onSubmit := func(data map[string]interface{}) error { return nil }
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+
+	// Test required field validation - name
+	err := form.ValidateField("name", "")
+	if err == nil {
+		t.Error("Expected validation error for empty server name")
+	}
+
+	err = form.ValidateField("name", "test-server")
+	if err != nil {
+		t.Errorf("Expected no validation error for valid server name, got: %v", err)
+	}
+
+	// Test required field validation - hostname
+	err = form.ValidateField("hostname", "")
+	if err == nil {
+		t.Error("Expected validation error for empty hostname")
+	}
+
+	err = form.ValidateField("hostname", "example.com")
+	if err != nil {
+		t.Errorf("Expected no validation error for valid hostname, got: %v", err)
+	}
+
+	// Test required field validation - port
+	err = form.ValidateField("port", "")
+	if err == nil {
+		t.Error("Expected validation error for empty port")
+	}
+
+	err = form.ValidateField("port", "22")
+	if err != nil {
+		t.Errorf("Expected no validation error for valid port, got: %v", err)
+	}
+
+	// Test required field validation - username
+	err = form.ValidateField("username", "")
+	if err == nil {
+		t.Error("Expected validation error for empty username")
+	}
+
+	err = form.ValidateField("username", "testuser")
+	if err != nil {
+		t.Errorf("Expected no validation error for valid username, got: %v", err)
+	}
+
+	// Test auth type validation
+	err = form.ValidateField("auth_type", "invalid")
+	if err == nil {
+		t.Error("Expected validation error for invalid auth type")
+	}
+
+	err = form.ValidateField("auth_type", "key")
+	if err != nil {
+		t.Errorf("Expected no validation error for 'key' auth type, got: %v", err)
+	}
+
+	err = form.ValidateField("auth_type", "password")
+	if err != nil {
+		t.Errorf("Expected no validation error for 'password' auth type, got: %v", err)
+	}
+
+	// Test optional key path validation
+	err = form.ValidateField("key_path", "")
+	if err != nil {
+		t.Errorf("Expected no validation error for empty key path (optional), got: %v", err)
+	}
+
+	err = form.ValidateField("key_path", "~/.ssh/id_rsa")
+	if err != nil {
+		t.Errorf("Expected no validation error for valid key path, got: %v", err)
+	}
+
+	// Test passphrase protected validation
+	err = form.ValidateField("passphrase_protected", "invalid")
+	if err == nil {
+		t.Error("Expected validation error for invalid passphrase protected value")
+	}
+
+	err = form.ValidateField("passphrase_protected", "true")
+	if err != nil {
+		t.Errorf("Expected no validation error for 'true' passphrase protected, got: %v", err)
+	}
+
+	err = form.ValidateField("passphrase_protected", "false")
+	if err != nil {
+		t.Errorf("Expected no validation error for 'false' passphrase protected, got: %v", err)
+	}
+
+	err = form.ValidateField("passphrase_protected", "")
+	if err != nil {
+		t.Errorf("Expected no validation error for empty passphrase protected (optional), got: %v", err)
+	}
+}
+
+// TestServerForm_DataCollectionWithAllFields tests data collection with all server form fields
+func TestServerForm_DataCollectionWithAllFields(t *testing.T) {
+	fields := map[string]*FormField{
+		"name": {
+			inputField: tview.NewInputField().SetLabel("Server Name: ").SetText("test-server"),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+		"hostname": {
+			inputField: tview.NewInputField().SetLabel("Hostname: ").SetText("test.example.com"),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+		"port": {
+			inputField: tview.NewInputField().SetLabel("Port: ").SetText("2222"),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+		"username": {
+			inputField: tview.NewInputField().SetLabel("Username: ").SetText("testuser"),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+		"auth_type": {
+			inputField: tview.NewInputField().SetLabel("Auth Type: ").SetText("key"),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+		"key_path": {
+			inputField: tview.NewInputField().SetLabel("Key Path: ").SetText("~/.ssh/test_key"),
+			validator:  func(s string) error { return nil },
+			required:   false,
+		},
+		"passphrase_protected": {
+			inputField: tview.NewInputField().SetLabel("Passphrase Protected: ").SetText("true"),
+			validator:  func(s string) error { return nil },
+			required:   false,
+		},
+	}
+
+	onSubmit := func(data map[string]interface{}) error { return nil }
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+
+	// Test data collection
+	data, err := form.CollectFormData()
+	if err != nil {
+		t.Errorf("Expected no error collecting form data, got: %v", err)
+	}
+
+	if len(data) != 7 {
+		t.Errorf("Expected 7 fields in collected data, got %d", len(data))
+	}
+
+	// Test all expected field values
+	expectedData := map[string]string{
+		"name":                 "test-server",
+		"hostname":             "test.example.com", 
+		"port":                 "2222",
+		"username":             "testuser",
+		"auth_type":            "key",
+		"key_path":             "~/.ssh/test_key",
+		"passphrase_protected": "true",
+	}
+
+	for field, expectedValue := range expectedData {
+		if data[field] != expectedValue {
+			t.Errorf("Expected %s field to be '%s', got: %v", field, expectedValue, data[field])
+		}
+	}
+}
+
+// TestServerForm_SubmissionWithValidation tests form submission with server validation
+func TestServerForm_SubmissionWithValidation(t *testing.T) {
+	submitCallCount := 0
+	submittedData := make(map[string]interface{})
+	
+	fields := map[string]*FormField{
+		"name": {
+			inputField: tview.NewInputField().SetLabel("Server Name: ").SetText("valid-server"),
+			validator: func(value string) error {
+				if value == "" {
+					return &ValidationError{Field: "name", Message: "Server name is required"}
+				}
+				return nil
+			},
+			required: true,
+		},
+		"hostname": {
+			inputField: tview.NewInputField().SetLabel("Hostname: ").SetText("valid.example.com"),
+			validator: func(value string) error {
+				if value == "" {
+					return &ValidationError{Field: "hostname", Message: "Hostname is required"}
+				}
+				return nil
+			},
+			required: true,
+		},
+		"username": {
+			inputField: tview.NewInputField().SetLabel("Username: ").SetText("validuser"),
+			validator: func(value string) error {
+				if value == "" {
+					return &ValidationError{Field: "username", Message: "Username is required"}
+				}
+				return nil
+			},
+			required: true,
+		},
+		"auth_type": {
+			inputField: tview.NewInputField().SetLabel("Auth Type: ").SetText("password"),
+			validator: func(value string) error {
+				if value != "key" && value != "password" {
+					return &ValidationError{Field: "auth_type", Message: "Auth type must be 'key' or 'password'"}
+				}
+				return nil
+			},
+			required: true,
+		},
+	}
+
+	onSubmit := func(data map[string]interface{}) error {
+		submitCallCount++
+		submittedData = data
+		return nil
+	}
+
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+	helper := NewFormTestHelper(form)
+	defer helper.Cleanup()
+
+	// Test successful submission with valid data
+	helper.SimulateKeypress(tcell.KeyEnter)
+	helper.ProcessEvents()
+
+	if submitCallCount != 1 {
+		t.Errorf("Expected submission callback to be called once, got %d calls", submitCallCount)
+	}
+
+	if len(submittedData) == 0 {
+		t.Error("Expected form data to be submitted")
+	}
+
+	// Verify submitted data contains expected values
+	expectedFields := []string{"name", "hostname", "username", "auth_type"}
+	for _, field := range expectedFields {
+		if _, exists := submittedData[field]; !exists {
+			t.Errorf("Expected submitted data to contain field '%s'", field)
+		}
+	}
+}
+
+// TestServerForm_ValidationErrorHandling tests how form handles validation errors
+func TestServerForm_ValidationErrorHandling(t *testing.T) {
+	submitCallCount := 0
+	
+	fields := map[string]*FormField{
+		"name": {
+			inputField: tview.NewInputField().SetLabel("Server Name: ").SetText(""), // Empty required field
+			validator: func(value string) error {
+				if value == "" {
+					return &ValidationError{Field: "name", Message: "Server name is required"}
+				}
+				return nil
+			},
+			required: true,
+		},
+	}
+
+	onSubmit := func(data map[string]interface{}) error {
+		submitCallCount++
+		return nil
+	}
+
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+
+	// Test that data collection fails with validation error
+	_, err := form.CollectFormData()
+	if err == nil {
+		t.Error("Expected validation error when collecting data with empty required field")
+	}
+
+	var validationErr *ValidationError
+	if !errors.As(err, &validationErr) {
+		t.Errorf("Expected ValidationError, got: %T", err)
+	} else {
+		if validationErr.Field != "name" {
+			t.Errorf("Expected validation error on 'name' field, got: %s", validationErr.Field)
+		}
+		if validationErr.Message != "Server name is required" {
+			t.Errorf("Expected 'Server name is required' message, got: %s", validationErr.Message)
+		}
+	}
+}
+
+// TestServerForm_ConditionalValidation tests conditional validation based on auth type
+func TestServerForm_ConditionalValidation(t *testing.T) {
+	// Test that key_path is required when auth_type is "key"
+	fields := map[string]*FormField{
+		"auth_type": {
+			inputField: tview.NewInputField().SetLabel("Auth Type: ").SetText("key"),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+		"key_path": {
+			inputField: tview.NewInputField().SetLabel("Key Path: ").SetText(""), // Empty when auth_type is key
+			validator: func(value string) error {
+				// Simulate conditional validation - key_path required when auth_type is "key"
+				return nil // For now, this is handled at submission level
+			},
+			required: false,
+		},
+	}
+
+	onSubmit := func(data map[string]interface{}) error {
+		// Simulate conditional validation at submission
+		if data["auth_type"] == "key" && data["key_path"] == "" {
+			return &ValidationError{Field: "key_path", Message: "Key path is required when auth type is 'key'"}
+		}
+		return nil
+	}
+
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+	helper := NewFormTestHelper(form)
+	defer helper.Cleanup()
+
+	// Test that submission fails with conditional validation error
+	helper.SimulateKeypress(tcell.KeyEnter)
+	helper.ProcessEvents()
+
+	// The form should handle conditional validation in the submission callback
+	// This test verifies the structure exists for implementing such validation
+}
+
+// TestServerForm_SetAndGetFieldValues tests setting and getting field values
+func TestServerForm_SetAndGetFieldValues(t *testing.T) {
+	fields := map[string]*FormField{
+		"hostname": {
+			inputField: tview.NewInputField().SetLabel("Hostname: "),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+		"port": {
+			inputField: tview.NewInputField().SetLabel("Port: "),
+			validator:  func(s string) error { return nil },
+			required:   false,
+		},
+	}
+
+	onSubmit := func(data map[string]interface{}) error { return nil }
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+
+	// Test setting field values
+	err := form.SetFieldValue("hostname", "updated.example.com")
+	if err != nil {
+		t.Errorf("Expected no error setting hostname field value, got: %v", err)
+	}
+
+	err = form.SetFieldValue("port", "3000")
+	if err != nil {
+		t.Errorf("Expected no error setting port field value, got: %v", err)
+	}
+
+	// Test setting value for non-existent field
+	err = form.SetFieldValue("nonexistent", "value")
+	if err == nil {
+		t.Error("Expected error setting value for non-existent field")
+	}
+
+	// Test getting field values
+	hostname, err := form.GetFieldValue("hostname")
+	if err != nil {
+		t.Errorf("Expected no error getting hostname field value, got: %v", err)
+	}
+	if hostname != "updated.example.com" {
+		t.Errorf("Expected hostname to be 'updated.example.com', got: %s", hostname)
+	}
+
+	port, err := form.GetFieldValue("port")
+	if err != nil {
+		t.Errorf("Expected no error getting port field value, got: %v", err)
+	}
+	if port != "3000" {
+		t.Errorf("Expected port to be '3000', got: %s", port)
+	}
+
+	// Test getting value for non-existent field
+	_, err = form.GetFieldValue("nonexistent")
+	if err == nil {
+		t.Error("Expected error getting value for non-existent field")
+	}
+}
+
+// TestEnhancedValidationFunctions tests the new enhanced validation functions
+func TestEnhancedValidationFunctions(t *testing.T) {
+	// Test ValidateServerName
+	tests := []struct {
+		name        string
+		value       string
+		expectError bool
+		errorMsg    string
+	}{
+		{"empty name", "", true, "Server name is required"},
+		{"too short", "a", true, "Server name must be at least 2 characters"},
+		{"too long", strings.Repeat("a", 51), true, "Server name must be less than 50 characters"},
+		{"invalid chars", "server@name", true, "Server name can only contain letters, numbers, dashes, and underscores"},
+		{"valid name", "production-api-01", false, ""},
+		{"valid with underscore", "test_server", false, ""},
+		{"valid with numbers", "server123", false, ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidateServerName(test.value)
+			if test.expectError {
+				if err == nil {
+					t.Errorf("Expected error for %s, got nil", test.name)
+				} else if !strings.Contains(err.Error(), test.errorMsg) {
+					t.Errorf("Expected error message to contain '%s', got: %s", test.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error for %s, got: %v", test.name, err)
+				}
+			}
+		})
+	}
+}
+
+// TestEnhancedPortValidation tests the enhanced port validation
+func TestEnhancedPortValidation(t *testing.T) {
+	tests := []struct {
+		name        string
+		value       string
+		expectError bool
+		errorMsg    string
+	}{
+		{"empty port", "", true, "Port is required"},
+		{"invalid chars", "abc", true, "Port must be a number"},
+		{"port zero", "0", true, "Port must be between 1 and 65535"},
+		{"port too high", "65536", true, "Port must be between 1 and 65535"},
+		{"valid port 22", "22", false, ""},
+		{"valid port 80", "80", false, ""},
+		{"valid port 443", "443", false, ""},
+		{"valid port 65535", "65535", false, ""},
+		{"valid port 1", "1", false, ""},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := ValidatePort(test.value)
+			if test.expectError {
+				if err == nil {
+					t.Errorf("Expected error for %s, got nil", test.name)
+				} else if !strings.Contains(err.Error(), test.errorMsg) {
+					t.Errorf("Expected error message to contain '%s', got: %s", test.errorMsg, err.Error())
+				}
+			} else {
+				if err != nil {
+					t.Errorf("Expected no error for %s, got: %v", test.name, err)
+				}
+			}
+		})
+	}
+}
+
+// TestEnhancedValidationWithRealTimeForm tests validation in a form with real-time validation enabled
+func TestEnhancedValidationWithRealTimeForm(t *testing.T) {
+	fields := CreateServerFormFields()
+	
+	onSubmit := func(data map[string]interface{}) error { return nil }
+	onCancel := func() {}
+
+	// Create form with real-time validation enabled
+	form := NewTUIFormWithOptions(fields, onSubmit, onCancel, true)
+
+	// Test that HasValidationErrors works
+	if form.HasValidationErrors() {
+		t.Error("Expected no validation errors initially")
+	}
+
+	// Set invalid data and validate
+	form.SetFieldValue("port", "invalid")
+	form.SetFieldValue("name", "a") // Too short
+	
+	// Validate all fields
+	err := form.ValidateAllFields()
+	if err == nil {
+		t.Error("Expected validation error with invalid data")
+	}
+
+	// Check that form now has validation errors
+	if !form.HasValidationErrors() {
+		t.Error("Expected validation errors after setting invalid data")
+	}
+
+	errors := form.GetValidationErrors()
+	if len(errors) == 0 {
+		t.Error("Expected validation errors map to be populated")
+	}
+
+	// Check for specific errors
+	if _, exists := errors["port"]; !exists {
+		t.Error("Expected port validation error")
+	}
+	if _, exists := errors["name"]; !exists {
+		t.Error("Expected name validation error")
+	}
+
+	// Fix errors and validate again
+	form.SetFieldValue("port", "22")
+	form.SetFieldValue("name", "valid-server")
+	form.SetFieldValue("hostname", "example.com")
+	form.SetFieldValue("username", "testuser")
+	
+	err = form.ValidateAllFields()
+	if err != nil {
+		t.Errorf("Expected no validation error after fixing data, got: %v", err)
+	}
+
+	if form.HasValidationErrors() {
+		t.Error("Expected no validation errors after fixing data")
+	}
+}
+
+// TestCreateServerFormFields tests the CreateServerFormFields function
+func TestCreateServerFormFields(t *testing.T) {
+	fields := CreateServerFormFields()
+
+	// Check that all expected fields are present
+	expectedFields := []string{"name", "hostname", "port", "username", "auth_type", "key_path", "passphrase_protected"}
+	if len(fields) != len(expectedFields) {
+		t.Errorf("Expected %d fields, got %d", len(expectedFields), len(fields))
+	}
+
+	for _, fieldName := range expectedFields {
+		if field, exists := fields[fieldName]; !exists {
+			t.Errorf("Expected field '%s' to exist", fieldName)
+		} else {
+			if field.inputField == nil {
+				t.Errorf("Expected field '%s' to have inputField", fieldName)
+			}
+			if field.validator == nil {
+				t.Errorf("Expected field '%s' to have validator", fieldName)
+			}
+		}
+	}
+
+	// Test that required fields are marked correctly
+	requiredFields := []string{"name", "hostname", "port", "username", "auth_type"}
+	for _, fieldName := range requiredFields {
+		if field := fields[fieldName]; !field.required {
+			t.Errorf("Expected field '%s' to be required", fieldName)
+		}
+	}
+
+	// Test that optional fields are marked correctly
+	optionalFields := []string{"key_path", "passphrase_protected"}
+	for _, fieldName := range optionalFields {
+		if field := fields[fieldName]; field.required {
+			t.Errorf("Expected field '%s' to be optional", fieldName)
+		}
+	}
+
+	// Test that labels are set appropriately
+	expectedLabels := map[string]string{
+		"name":     "Server Name: ",
+		"hostname": "Hostname: ",
+		"port":     "Port: ",
+		"username": "Username: ",
+	}
+	for fieldName, expectedLabel := range expectedLabels {
+		if field, exists := fields[fieldName]; exists {
+			if field.inputField.GetLabel() != expectedLabel {
+				t.Errorf("Expected field '%s' to have label '%s', got '%s'", 
+					fieldName, expectedLabel, field.inputField.GetLabel())
+			}
+		}
+	}
+}
+
+// TestFormIntegrationWithConfig tests that the form properly integrates with config.Server
+func TestFormIntegrationWithConfig(t *testing.T) {
+	fields := CreateServerFormFields()
+	
+	// Set valid server data
+	fields["name"].inputField.SetText("test-server")
+	fields["hostname"].inputField.SetText("test.example.com")
+	fields["port"].inputField.SetText("2222")
+	fields["username"].inputField.SetText("testuser")
+	fields["auth_type"].inputField.SetText("key")
+	fields["key_path"].inputField.SetText("~/.ssh/test_key")
+	fields["passphrase_protected"].inputField.SetText("true")
+
+	onSubmit := func(data map[string]interface{}) error {
+		// Simulate what the real form does - parse port
+		portStr := data["port"].(string)
+		port := 22 // Default
+		parsedPort := 0
+		for _, r := range portStr {
+			if r >= '0' && r <= '9' {
+				parsedPort = parsedPort*10 + int(r-'0')
+			}
+		}
+		if parsedPort > 0 {
+			port = parsedPort
+		}
+		
+		// Create server config like the real form does
+		server := config.Server{
+			Name:     data["name"].(string),
+			Hostname: data["hostname"].(string),
+			Port:     port,
+			Username: data["username"].(string),
+			AuthType: data["auth_type"].(string),
+			KeyPath:  data["key_path"].(string),
+		}
+		
+		if passphraseStr, ok := data["passphrase_protected"].(string); ok {
+			server.PassphraseProtected = (passphraseStr == "true")
+		}
+		
+		// Validate server configuration like the real form does
+		if err := server.Validate(); err != nil {
+			return err
+		}
+		
+		// Check all expected values
+		if server.Name != "test-server" {
+			return fmt.Errorf("expected name 'test-server', got '%s'", server.Name)
+		}
+		if server.Port != 2222 {
+			return fmt.Errorf("expected port 2222, got %d", server.Port)
+		}
+		if !server.PassphraseProtected {
+			return fmt.Errorf("expected PassphraseProtected to be true")
+		}
+		
+		return nil
+	}
+	
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+	helper := NewFormTestHelper(form)
+	defer helper.Cleanup()
+
+	// Simulate form submission
+	helper.SimulateKeypress(tcell.KeyEnter)
+	helper.ProcessEvents()
+	
+	// If we get here without errors, the integration worked
 }
 

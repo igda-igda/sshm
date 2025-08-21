@@ -8,100 +8,55 @@ import (
 	"sshm/internal/config"
 )
 
-// CreateAddServerForm creates a form for adding new servers
+// CreateAddServerForm creates a form for adding new servers with enhanced validation
 func (t *TUIApp) CreateAddServerForm() *TUIForm {
-	fields := map[string]*FormField{
-		"name": {
-			inputField: tview.NewInputField().
-				SetLabel("Server Name: ").
-				SetFieldWidth(30),
-			validator: func(value string) error {
-				if value == "" {
-					return &ValidationError{Field: "name", Message: "Server name is required"}
-				}
-				// Check if server already exists
-				if _, err := t.config.GetServer(value); err == nil {
-					return &ValidationError{Field: "name", Message: "Server name already exists"}
-				}
-				return nil
-			},
-			required: true,
-		},
-		"hostname": {
-			inputField: tview.NewInputField().
-				SetLabel("Hostname: ").
-				SetFieldWidth(30),
-			validator: func(value string) error {
-				if value == "" {
-					return &ValidationError{Field: "hostname", Message: "Hostname is required"}
-				}
-				return nil
-			},
-			required: true,
-		},
-		"port": {
-			inputField: tview.NewInputField().
-				SetLabel("Port: ").
-				SetText("22").
-				SetFieldWidth(10),
-			validator: func(value string) error {
-				if value == "" {
-					return &ValidationError{Field: "port", Message: "Port is required"}
-				}
-				// Could add numeric validation here
-				return nil
-			},
-			required: true,
-		},
-		"username": {
-			inputField: tview.NewInputField().
-				SetLabel("Username: ").
-				SetFieldWidth(20),
-			validator: func(value string) error {
-				if value == "" {
-					return &ValidationError{Field: "username", Message: "Username is required"}
-				}
-				return nil
-			},
-			required: true,
-		},
-		"auth_type": {
-			inputField: tview.NewInputField().
-				SetLabel("Auth Type (key/password): ").
-				SetText("key").
-				SetFieldWidth(15),
-			validator: func(value string) error {
-				if value != "key" && value != "password" {
-					return &ValidationError{Field: "auth_type", Message: "Auth type must be 'key' or 'password'"}
-				}
-				return nil
-			},
-			required: true,
-		},
-		"key_path": {
-			inputField: tview.NewInputField().
-				SetLabel("Key Path (optional): ").
-				SetFieldWidth(40),
-			validator: func(value string) error {
-				// Key path is optional but could validate file existence
-				return nil
-			},
-			required: false,
-		},
+	// Start with the standard server form fields
+	fields := CreateServerFormFields()
+	
+	// Override name validator to check for existing servers
+	fields["name"].validator = func(value string) error {
+		// First run the standard validation
+		if err := ValidateServerName(value); err != nil {
+			return err
+		}
+		
+		// Check if server already exists
+		if _, err := t.config.GetServer(value); err == nil {
+			return &ValidationError{Field: "name", Message: "Server name already exists"}
+		}
+		return nil
 	}
 
 	onSubmit := func(data map[string]interface{}) error {
+		// Parse port as integer
+		portStr := data["port"].(string)
+		port := 22 // Default
+		parsedPort := 0
+		for _, r := range portStr {
+			if r >= '0' && r <= '9' {
+				parsedPort = parsedPort*10 + int(r-'0')
+			}
+		}
+		if parsedPort > 0 {
+			port = parsedPort
+		}
+		
 		// Create new server configuration
 		server := config.Server{
 			Name:     data["name"].(string),
 			Hostname: data["hostname"].(string),
-			Port:     22, // Default port, could parse from data["port"]
+			Port:     port,
 			Username: data["username"].(string),
 			AuthType: data["auth_type"].(string),
 		}
 		
 		if keyPath, ok := data["key_path"].(string); ok && keyPath != "" {
 			server.KeyPath = keyPath
+		}
+		
+		// Handle passphrase protected flag
+		if passphraseStr, ok := data["passphrase_protected"].(string); ok {
+			server.PassphraseProtected = (passphraseStr == "true")
 		}
 		
 		// Validate server configuration
@@ -137,10 +92,11 @@ func (t *TUIApp) CreateAddServerForm() *TUIForm {
 		}
 	}
 
-	return NewTUIForm(fields, onSubmit, onCancel)
+	// Create form with real-time validation enabled
+	return NewTUIFormWithOptions(fields, onSubmit, onCancel, true)
 }
 
-// CreateEditServerForm creates a form for editing existing servers
+// CreateEditServerForm creates a form for editing existing servers with enhanced validation
 func (t *TUIApp) CreateEditServerForm(serverName string) *TUIForm {
 	// Get existing server configuration
 	server, err := t.config.GetServer(serverName)
@@ -149,102 +105,68 @@ func (t *TUIApp) CreateEditServerForm(serverName string) *TUIForm {
 		return t.CreateAddServerForm()
 	}
 
-	fields := map[string]*FormField{
-		"name": {
-			inputField: tview.NewInputField().
-				SetLabel("Server Name: ").
-				SetText(server.Name).
-				SetFieldWidth(30),
-			validator: func(value string) error {
-				if value == "" {
-					return &ValidationError{Field: "name", Message: "Server name is required"}
-				}
-				// Allow same name (editing) but check for conflicts with other servers
-				if value != serverName {
-					if _, err := t.config.GetServer(value); err == nil {
-						return &ValidationError{Field: "name", Message: "Server name already exists"}
-					}
-				}
-				return nil
-			},
-			required: true,
-		},
-		"hostname": {
-			inputField: tview.NewInputField().
-				SetLabel("Hostname: ").
-				SetText(server.Hostname).
-				SetFieldWidth(30),
-			validator: func(value string) error {
-				if value == "" {
-					return &ValidationError{Field: "hostname", Message: "Hostname is required"}
-				}
-				return nil
-			},
-			required: true,
-		},
-		"port": {
-			inputField: tview.NewInputField().
-				SetLabel("Port: ").
-				SetText(fmt.Sprintf("%d", server.Port)).
-				SetFieldWidth(10),
-			validator: func(value string) error {
-				if value == "" {
-					return &ValidationError{Field: "port", Message: "Port is required"}
-				}
-				return nil
-			},
-			required: true,
-		},
-		"username": {
-			inputField: tview.NewInputField().
-				SetLabel("Username: ").
-				SetText(server.Username).
-				SetFieldWidth(20),
-			validator: func(value string) error {
-				if value == "" {
-					return &ValidationError{Field: "username", Message: "Username is required"}
-				}
-				return nil
-			},
-			required: true,
-		},
-		"auth_type": {
-			inputField: tview.NewInputField().
-				SetLabel("Auth Type (key/password): ").
-				SetText(server.AuthType).
-				SetFieldWidth(15),
-			validator: func(value string) error {
-				if value != "key" && value != "password" {
-					return &ValidationError{Field: "auth_type", Message: "Auth type must be 'key' or 'password'"}
-				}
-				return nil
-			},
-			required: true,
-		},
-		"key_path": {
-			inputField: tview.NewInputField().
-				SetLabel("Key Path (optional): ").
-				SetText(server.KeyPath).
-				SetFieldWidth(40),
-			validator: func(value string) error {
-				return nil
-			},
-			required: false,
-		},
+	// Start with the standard server form fields
+	fields := CreateServerFormFields()
+	
+	// Pre-populate fields with existing server data
+	fields["name"].inputField.SetText(server.Name)
+	fields["hostname"].inputField.SetText(server.Hostname)
+	fields["port"].inputField.SetText(fmt.Sprintf("%d", server.Port))
+	fields["username"].inputField.SetText(server.Username)
+	fields["auth_type"].inputField.SetText(server.AuthType)
+	fields["key_path"].inputField.SetText(server.KeyPath)
+	if server.PassphraseProtected {
+		fields["passphrase_protected"].inputField.SetText("true")
+	} else {
+		fields["passphrase_protected"].inputField.SetText("false")
+	}
+	
+	// Override name validator to allow same name but check for conflicts with other servers
+	fields["name"].validator = func(value string) error {
+		// First run the standard validation
+		if err := ValidateServerName(value); err != nil {
+			return err
+		}
+		
+		// Allow same name (editing) but check for conflicts with other servers
+		if value != serverName {
+			if _, err := t.config.GetServer(value); err == nil {
+				return &ValidationError{Field: "name", Message: "Server name already exists"}
+			}
+		}
+		return nil
 	}
 
 	onSubmit := func(data map[string]interface{}) error {
+		// Parse port as integer
+		portStr := data["port"].(string)
+		port := 22 // Default
+		parsedPort := 0
+		for _, r := range portStr {
+			if r >= '0' && r <= '9' {
+				parsedPort = parsedPort*10 + int(r-'0')
+			}
+		}
+		if parsedPort > 0 {
+			port = parsedPort
+		}
+		
 		// Update server configuration
 		updatedServer := config.Server{
 			Name:     data["name"].(string),
 			Hostname: data["hostname"].(string),
-			Port:     22, // Could parse from data["port"]
+			Port:     port,
 			Username: data["username"].(string),
 			AuthType: data["auth_type"].(string),
 		}
 		
 		if keyPath, ok := data["key_path"].(string); ok && keyPath != "" {
 			updatedServer.KeyPath = keyPath
+		}
+		
+		// Handle passphrase protected flag
+		if passphraseStr, ok := data["passphrase_protected"].(string); ok {
+			updatedServer.PassphraseProtected = (passphraseStr == "true")
 		}
 		
 		// Validate server configuration
@@ -285,7 +207,8 @@ func (t *TUIApp) CreateEditServerForm(serverName string) *TUIForm {
 		}
 	}
 
-	return NewTUIForm(fields, onSubmit, onCancel)
+	// Create form with real-time validation enabled
+	return NewTUIFormWithOptions(fields, onSubmit, onCancel, true)
 }
 
 // ShowAddServerModal displays the add server modal
