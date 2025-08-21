@@ -32,6 +32,7 @@ type TUIApp struct {
 	statusBar        *tview.TextView
 	config           *config.Config
 	tmuxManager      *tmux.Manager
+	modalManager     *ModalManager
 	
 	// Application state
 	running              bool
@@ -66,6 +67,9 @@ func NewTUIApp() (*TUIApp, error) {
 	if err := tuiApp.setupLayout(); err != nil {
 		return nil, fmt.Errorf("failed to setup layout: %w", err)
 	}
+
+	// Initialize modal manager after layout is setup
+	tuiApp.modalManager = NewModalManager(tuiApp.app, tuiApp.layout)
 
 	// Setup global key bindings
 	tuiApp.setupKeyBindings()
@@ -210,11 +214,31 @@ func (t *TUIApp) renderProfileTabs() string {
 // setupKeyBindings configures global key bindings
 func (t *TUIApp) setupKeyBindings() {
 	t.app.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		// Handle special keys first
+		// Check if modal is active first - let modals handle their own keys
+		if t.modalManager != nil && t.modalManager.IsModalActive() {
+			// If a modal is active, let it handle the key first
+			if currentModal := t.modalManager.GetCurrentModal(); currentModal != nil {
+				// Only handle global Escape if modal doesn't consume it
+				if event.Key() == tcell.KeyEscape {
+					t.modalManager.HideModal()
+					return nil
+				}
+			}
+			return event // Let modal handle other keys
+		}
+		
+		// Handle special keys first (only when no modal is active)
 		switch event.Key() {
 		case tcell.KeyCtrlC:
 			t.Stop()
 			return nil
+		case tcell.KeyEscape:
+			// Escape closes any active modal or does nothing if none
+			if t.modalManager != nil && t.modalManager.IsModalActive() {
+				t.modalManager.HideModal()
+				return nil
+			}
+			return event
 		case tcell.KeyUp:
 			t.handleNavigationUp()
 			return nil
@@ -469,11 +493,42 @@ func (t *TUIApp) showErrorModal(message string) {
 		SetText(fmt.Sprintf("❌ Error\n\n%s", message)).
 		AddButtons([]string{"OK"}).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-			t.app.SetRoot(t.layout, true)
+			if t.modalManager != nil {
+				t.modalManager.HideModal()
+			} else {
+				t.app.SetRoot(t.layout, true)
+			}
 		}).
 		SetBackgroundColor(tcell.ColorDarkRed)
 	
-	t.app.SetRoot(modal, true)
+	// Add consistent Enter key handling
+	modal.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEnter:
+			// Enter key dismisses error modal
+			if t.modalManager != nil {
+				t.modalManager.HideModal()
+			} else {
+				t.app.SetRoot(t.layout, true)
+			}
+			return nil
+		case tcell.KeyEscape:
+			// Escape also dismisses the modal
+			if t.modalManager != nil {
+				t.modalManager.HideModal()
+			} else {
+				t.app.SetRoot(t.layout, true)
+			}
+			return nil
+		}
+		return event
+	})
+	
+	if t.modalManager != nil {
+		t.modalManager.ShowModal(modal)
+	} else {
+		t.app.SetRoot(modal, true)
+	}
 }
 
 // refreshData reloads configuration and refreshes the display
@@ -683,13 +738,55 @@ func (t *TUIApp) showHelp() {
 		SetText(helpText).
 		AddButtons([]string{"Close"}).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-			t.app.SetRoot(t.layout, true)
-			t.app.SetFocus(t.layout)
+			if t.modalManager != nil {
+				t.modalManager.HideModal()
+			} else {
+				t.app.SetRoot(t.layout, true)
+				t.app.SetFocus(t.layout)
+			}
 		}).
 		SetBackgroundColor(tcell.ColorDarkBlue)
 
-	t.app.SetRoot(modal, true)
-	t.app.SetFocus(modal)
+	// Add consistent Enter/Escape key handling
+	modal.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEnter:
+			// Enter key dismisses help modal
+			if t.modalManager != nil {
+				t.modalManager.HideModal()
+			} else {
+				t.app.SetRoot(t.layout, true)
+				t.app.SetFocus(t.layout)
+			}
+			return nil
+		case tcell.KeyEscape:
+			// Escape also dismisses the modal
+			if t.modalManager != nil {
+				t.modalManager.HideModal()
+			} else {
+				t.app.SetRoot(t.layout, true)
+				t.app.SetFocus(t.layout)
+			}
+			return nil
+		case tcell.Key('q'), tcell.Key('Q'), tcell.Key('?'):
+			// '?' also dismisses help (toggle behavior)
+			if t.modalManager != nil {
+				t.modalManager.HideModal()
+			} else {
+				t.app.SetRoot(t.layout, true)
+				t.app.SetFocus(t.layout)
+			}
+			return nil
+		}
+		return event
+	})
+
+	if t.modalManager != nil {
+		t.modalManager.ShowModal(modal)
+	} else {
+		t.app.SetRoot(modal, true)
+		t.app.SetFocus(modal)
+	}
 }
 
 // Run starts the TUI application
@@ -1101,23 +1198,7 @@ func (t *TUIApp) editSelectedServer() {
 	}
 	
 	serverName := nameCell.Text
-	
-	// Show edit modal
-	modal := tview.NewModal().
-		SetText(fmt.Sprintf("Edit server: %s\n\n(Server editing functionality will be implemented in CLI integration phase)\n\nThis will open the server configuration for editing.", serverName)).
-		AddButtons([]string{"OK", "Cancel"}).
-		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-			if buttonLabel == "OK" {
-				// TODO: Implement actual editing logic in integration phase
-				// This would typically:
-				// 1. Launch external editor or show edit form
-				// 2. Update configuration
-				// 3. Refresh display
-			}
-			t.app.SetRoot(t.layout, true)
-		})
-	
-	t.app.SetRoot(modal, true)
+	t.ShowEditServerModal(serverName)
 }
 
 // deleteSelectedServer handles deleting the currently selected server
@@ -1170,8 +1251,12 @@ func (t *TUIApp) deleteSelectedServer() {
 		switch event.Key() {
 		case tcell.KeyEscape:
 			// Escape key cancels
-			t.app.SetRoot(t.layout, true)
-			t.app.SetFocus(t.layout)
+			if t.modalManager != nil {
+				t.modalManager.HideModal()
+			} else {
+				t.app.SetRoot(t.layout, true)
+				t.app.SetFocus(t.layout)
+			}
 			return nil
 		case tcell.KeyEnter:
 			// Enter key confirms delete
@@ -1185,15 +1270,42 @@ func (t *TUIApp) deleteSelectedServer() {
 			t.refreshSessions()
 			
 			// Return to main layout
-			t.app.SetRoot(t.layout, true)
-			t.app.SetFocus(t.layout)
+			if t.modalManager != nil {
+				t.modalManager.HideModal()
+			} else {
+				t.app.SetRoot(t.layout, true)
+				t.app.SetFocus(t.layout)
+			}
+			return nil
+		case tcell.Key('d'), tcell.Key('D'):
+			// 'd' key also confirms delete (consistent with key that opened modal)
+			if err := t.deleteServerFromConfig(serverName); err != nil {
+				t.showErrorModal(fmt.Sprintf("Error deleting server: %s", err.Error()))
+				return nil
+			}
+			
+			// Refresh the display after successful deletion
+			t.refreshServerList()
+			t.refreshSessions()
+			
+			// Return to main layout
+			if t.modalManager != nil {
+				t.modalManager.HideModal()
+			} else {
+				t.app.SetRoot(t.layout, true)
+				t.app.SetFocus(t.layout)
+			}
 			return nil
 		}
 		return event
 	})
 	
-	t.app.SetRoot(modal, true)
-	t.app.SetFocus(modal)
+	if t.modalManager != nil {
+		t.modalManager.ShowModal(modal)
+	} else {
+		t.app.SetRoot(modal, true)
+		t.app.SetFocus(modal)
+	}
 }
 
 // deleteServerFromConfig removes a server from the configuration
@@ -1246,18 +1358,7 @@ func (t *TUIApp) deleteServerFromConfig(serverName string) error {
 
 // addNewServer handles adding a new server configuration
 func (t *TUIApp) addNewServer() {
-	// Show placeholder modal for now - full implementation will be added later
-	modal := tview.NewModal().
-		SetText("Add New Server\n\n🚧 Server creation functionality will be implemented\nto provide full CLI command parity in TUI.\n\nFor now, please use CLI command:\n  sshm add <server-name>").
-		AddButtons([]string{"OK"}).
-		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-			t.app.SetRoot(t.layout, true)
-			t.app.SetFocus(t.layout)
-		}).
-		SetBackgroundColor(tcell.ColorDarkGreen)
-	
-	t.app.SetRoot(modal, true)
-	t.app.SetFocus(modal)
+	t.ShowAddServerModal()
 }
 
 // buildSSHCommand builds an SSH command string for a server (same logic as CLI)
