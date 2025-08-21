@@ -75,6 +75,9 @@ func NewTUIApp() (*TUIApp, error) {
 
 // setupLayout initializes the main UI layout
 func (t *TUIApp) setupLayout() error {
+	// Enable mouse support
+	t.app.EnableMouse(true)
+	
 	// Create status bar
 	t.statusBar = tview.NewTextView().
 		SetDynamicColors(true)
@@ -270,6 +273,9 @@ func (t *TUIApp) setupKeyBindings() {
 		case 'b', 'B':
 			t.connectToCurrentProfile()
 			return nil
+		case 'a', 'A':
+			t.addNewServer()
+			return nil
 		}
 		
 		return event
@@ -403,7 +409,7 @@ func (t *TUIApp) connectToSelectedServer() {
 	// Show connecting modal
 	t.showConnectingModal(serverName)
 	
-	// Create tmux session and connect (or reattach to existing)
+	// Create tmux session in background and stay in TUI
 	go func() {
 		sessionName, wasExisting, err := t.tmuxManager.ConnectToServer(server.Name, sshCommand)
 		if err != nil {
@@ -413,39 +419,38 @@ func (t *TUIApp) connectToSelectedServer() {
 			return
 		}
 		
-		// Stop the TUI application and attach to the session
+		// Session created successfully - show success message and stay in TUI
 		t.app.QueueUpdateDraw(func() {
-			t.Stop()
-		})
-		
-		// Attach to the session in the main thread
-		go func() {
-			// Small delay to ensure TUI has stopped
-			time.Sleep(100 * time.Millisecond)
-			
-			fmt.Printf("\n🚀 ")
+			// Hide the connecting modal and show success
+			var statusMsg string
 			if wasExisting {
-				fmt.Printf("Found existing tmux session: %s\n", sessionName)
-				fmt.Printf("📡 Reattaching to existing session\n")
+				statusMsg = fmt.Sprintf("✅ Connected to existing session: %s\n\n💡 Switch to Sessions tab (press 's') and press Enter on the session to attach.", sessionName)
 			} else {
-				fmt.Printf("Created tmux session: %s\n", sessionName)
-				fmt.Printf("🔗 SSH connection established\n")
+				statusMsg = fmt.Sprintf("✅ Created new session: %s\n\n💡 Switch to Sessions tab (press 's') and press Enter on the session to attach.", sessionName)
 			}
 			
-			fmt.Printf("📺 Attaching to session...\n\n")
+			successModal := tview.NewModal().
+				SetText(statusMsg).
+				AddButtons([]string{"OK", "Go to Sessions"}).
+				SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+					if buttonLabel == "Go to Sessions" {
+						// Switch to sessions panel
+						t.focusedPanel = "sessions"
+						t.updatePanelHighlight()
+						// Refresh sessions to show the new one
+						t.refreshSessions()
+					}
+					t.app.SetRoot(t.layout, true)
+					t.app.SetFocus(t.layout)
+				}).
+				SetBackgroundColor(tcell.ColorDarkGreen)
 			
-			// Attach to the session
-			err = t.tmuxManager.AttachSession(sessionName)
-			if err != nil {
-				// Don't fail - provide manual instructions
-				fmt.Printf("⚠️  Automatic attach failed (this can happen in some environments)\n")
-				fmt.Printf("To manually attach to your session, run:\n")
-				fmt.Printf("   tmux attach-session -t %s\n\n", sessionName)
-				fmt.Printf("✅ Session %s is ready for connection!\n", sessionName)
-			} else {
-				fmt.Printf("✅ Connected to %s successfully!\n", server.Name)
-			}
-		}()
+			t.app.SetRoot(successModal, true)
+			t.app.SetFocus(successModal)
+			
+			// Also refresh the session list in background
+			t.refreshSessions()
+		})
 	}()
 }
 
@@ -634,48 +639,57 @@ func (t *TUIApp) updateStatusBar(serverCount int) {
 
 // showHelp displays a help modal
 func (t *TUIApp) showHelp() {
-	helpText := `SSHM TUI Help
+	helpText := `[::b]SSHM TUI Help[::-]
 
-Navigation:
-  ↑/↓, j/k    Navigate lists
-  Enter       Connect to server / Attach to session
-  s           Switch focus between panels
-  
-Actions:
-  q           Quit application
-  ?           Show this help
-  r           Refresh data
-  e           Edit selected server
-  d           Delete selected server
-  
-Profile Navigation (Server panel):
-  Tab         Switch to next profile
-  Shift+Tab   Switch to previous profile
-  p           Switch to next profile
+[yellow::b]Navigation:[white::-]
+  [yellow]↑/↓, j/k[white]    Navigate lists
+  [yellow]Enter[white]       Connect to server / Attach to session
+  [yellow]s[white]           Switch focus between panels
 
-Session Management:
-  s           Switch focus to sessions panel
-  Enter       Attach to selected session (when in sessions)
-  
-Panel Focus:
-  Yellow border indicates active panel
-  
-Mouse support: Click to select items
+[yellow::b]Actions:[white::-]
+  [yellow]q[white]           Quit application
+  [yellow]?[white]           Show this help
+  [yellow]r[white]           Refresh data
+  [yellow]e[white]           Edit selected server
+  [yellow]d[white]           Delete selected server
+  [yellow]a[white]           Add new server
 
-Server Actions (when server is selected):
-  Enter       Connect to server
-  e           Edit server configuration
-  d           Delete server (with confirmation)
-  b           Connect to all servers in current profile (batch)`
+[yellow::b]Profile Navigation (Server panel):[white::-]
+  [yellow]Tab[white]         Switch to next profile
+  [yellow]Shift+Tab[white]   Switch to previous profile
+  [yellow]p[white]           Switch to next profile
+
+[yellow::b]Session Management:[white::-]
+  [yellow]s[white]           Switch focus to sessions panel
+  [yellow]Enter[white]       Attach to selected session (when in sessions)
+
+[yellow::b]Panel Focus:[white::-]
+  [yellow]Yellow border[white] indicates active panel
+
+[yellow::b]Mouse support:[white::-] Click to select items
+
+[yellow::b]Server Actions (when server is selected):[white::-]
+  [yellow]Enter[white]       Connect to server
+  [yellow]e[white]           Edit server configuration
+  [yellow]d[white]           Delete server (with confirmation)
+  [yellow]b[white]           Connect to all servers in current profile (batch)
+
+[green::b]Additional Notes:[white::-]
+[green]•[white] TUI exits when connecting to allow tmux to take over
+[green]•[white] Sessions are refreshed automatically when switching focus
+[green]•[white] Profile changes filter the server list in real-time`
 
 	modal := tview.NewModal().
 		SetText(helpText).
 		AddButtons([]string{"Close"}).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
 			t.app.SetRoot(t.layout, true)
-		})
+			t.app.SetFocus(t.layout)
+		}).
+		SetBackgroundColor(tcell.ColorDarkBlue)
 
 	t.app.SetRoot(modal, true)
+	t.app.SetFocus(modal)
 }
 
 // Run starts the TUI application
@@ -1125,32 +1139,61 @@ func (t *TUIApp) deleteSelectedServer() {
 	
 	serverName := nameCell.Text
 	
-	// Show confirmation modal
+	// Show confirmation modal with proper key handling
 	modal := tview.NewModal().
 		SetText(fmt.Sprintf("Delete server '%s'?\n\nThis action cannot be undone.", serverName)).
 		AddButtons([]string{"Delete", "Cancel"}).
 		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			defer func() {
+				// Always return to main layout
+				t.app.SetRoot(t.layout, true)
+				t.app.SetFocus(t.layout)
+			}()
+			
 			if buttonLabel == "Delete" {
 				// Delete the server from configuration
 				if err := t.deleteServerFromConfig(serverName); err != nil {
 					// Show error modal
-					errorModal := tview.NewModal().
-						SetText(fmt.Sprintf("Error deleting server: %s", err.Error())).
-						AddButtons([]string{"OK"}).
-						SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-							t.app.SetRoot(t.layout, true)
-						})
-					t.app.SetRoot(errorModal, true)
+					t.showErrorModal(fmt.Sprintf("Error deleting server: %s", err.Error()))
 					return
 				}
 				
 				// Refresh the display after successful deletion
 				t.refreshServerList()
+				t.refreshSessions()
 			}
+		}).
+		SetBackgroundColor(tcell.ColorDarkRed)
+
+	// Set up proper input capture for modal
+	modal.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEscape:
+			// Escape key cancels
 			t.app.SetRoot(t.layout, true)
-		})
+			t.app.SetFocus(t.layout)
+			return nil
+		case tcell.KeyEnter:
+			// Enter key confirms delete
+			if err := t.deleteServerFromConfig(serverName); err != nil {
+				t.showErrorModal(fmt.Sprintf("Error deleting server: %s", err.Error()))
+				return nil
+			}
+			
+			// Refresh the display after successful deletion
+			t.refreshServerList()
+			t.refreshSessions()
+			
+			// Return to main layout
+			t.app.SetRoot(t.layout, true)
+			t.app.SetFocus(t.layout)
+			return nil
+		}
+		return event
+	})
 	
 	t.app.SetRoot(modal, true)
+	t.app.SetFocus(modal)
 }
 
 // deleteServerFromConfig removes a server from the configuration
@@ -1199,6 +1242,22 @@ func (t *TUIApp) deleteServerFromConfig(serverName string) error {
 	}
 	
 	return nil
+}
+
+// addNewServer handles adding a new server configuration
+func (t *TUIApp) addNewServer() {
+	// Show placeholder modal for now - full implementation will be added later
+	modal := tview.NewModal().
+		SetText("Add New Server\n\n🚧 Server creation functionality will be implemented\nto provide full CLI command parity in TUI.\n\nFor now, please use CLI command:\n  sshm add <server-name>").
+		AddButtons([]string{"OK"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			t.app.SetRoot(t.layout, true)
+			t.app.SetFocus(t.layout)
+		}).
+		SetBackgroundColor(tcell.ColorDarkGreen)
+	
+	t.app.SetRoot(modal, true)
+	t.app.SetFocus(modal)
 }
 
 // buildSSHCommand builds an SSH command string for a server (same logic as CLI)
@@ -1255,7 +1314,7 @@ func (t *TUIApp) connectToCurrentProfile() {
 	// Show connecting modal
 	t.showGroupConnectingModal(t.currentFilter, len(servers))
 	
-	// Create group session and connect to all servers
+	// Create group session in background and stay in TUI
 	go func() {
 		// Convert config.Server slice to tmux.Server interface slice
 		tmuxServers := make([]tmux.Server, len(servers))
@@ -1271,49 +1330,44 @@ func (t *TUIApp) connectToCurrentProfile() {
 			return
 		}
 		
-		// Stop the TUI application and attach to the session
+		// Group session created successfully - show success message and stay in TUI
 		t.app.QueueUpdateDraw(func() {
-			t.Stop()
-		})
-		
-		// Attach to the session in the main thread
-		go func() {
-			// Small delay to ensure TUI has stopped
-			time.Sleep(100 * time.Millisecond)
-			
-			fmt.Printf("\n🚀 ")
+			// Hide the connecting modal and show success
+			var statusMsg string
 			if wasExisting {
-				fmt.Printf("Found existing group session: %s\n", sessionName)
-				fmt.Printf("🔌 Reattaching to existing session\n")
+				statusMsg = fmt.Sprintf("✅ Connected to existing group session: %s\n\n📊 Session has %d windows for servers\n\n💡 Switch to Sessions tab (press 's') and press Enter on the session to attach.", sessionName, len(servers))
 			} else {
-				fmt.Printf("Created group session: %s\n", sessionName)
-				fmt.Printf("📡 Created %d windows for servers\n", len(servers))
-				
-				// List the windows created
+				statusMsg = fmt.Sprintf("✅ Created group session: %s\n\n📊 Created %d windows for servers:\n", sessionName, len(servers))
+				// Add server list
 				for i, server := range servers {
-					fmt.Printf("   • Window %d: %s (%s@%s:%d)\n", 
+					statusMsg += fmt.Sprintf("   • Window %d: %s (%s@%s:%d)\n", 
 						i+1, server.Name, server.Username, server.Hostname, server.Port)
 				}
+				statusMsg += "\n💡 Switch to Sessions tab (press 's') and press Enter on the session to attach."
 			}
 			
-			fmt.Printf("📺 Attaching to group session...\n\n")
+			successModal := tview.NewModal().
+				SetText(statusMsg).
+				AddButtons([]string{"OK", "Go to Sessions"}).
+				SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+					if buttonLabel == "Go to Sessions" {
+						// Switch to sessions panel
+						t.focusedPanel = "sessions"
+						t.updatePanelHighlight()
+						// Refresh sessions to show the new one
+						t.refreshSessions()
+					}
+					t.app.SetRoot(t.layout, true)
+					t.app.SetFocus(t.layout)
+				}).
+				SetBackgroundColor(tcell.ColorDarkGreen)
 			
-			// Attach to the session
-			err = t.tmuxManager.AttachSession(sessionName)
-			if err != nil {
-				// Don't fail - provide manual instructions
-				fmt.Printf("⚠️  Automatic attach failed (this can happen in some environments)\n")
-				fmt.Printf("To manually attach to your group session, run:\n")
-				fmt.Printf("   tmux attach-session -t %s\n", sessionName)
-				fmt.Printf("To switch between windows, use:\n")
-				fmt.Printf("   Ctrl+b, then number key (1, 2, 3, etc.)\n")
-				fmt.Printf("   Ctrl+b, then 'n' for next window\n")
-				fmt.Printf("   Ctrl+b, then 'p' for previous window\n")
-				fmt.Printf("✅ Group session %s is ready!\n", sessionName)
-			} else {
-				fmt.Printf("✅ Connected to profile '%s' group session successfully!\n", t.currentFilter)
-			}
-		}()
+			t.app.SetRoot(successModal, true)
+			t.app.SetFocus(successModal)
+			
+			// Also refresh the session list in background
+			t.refreshSessions()
+		})
 	}()
 }
 
