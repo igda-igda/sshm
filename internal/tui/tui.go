@@ -300,6 +300,21 @@ func (t *TUIApp) setupKeyBindings() {
 		case 'a', 'A':
 			t.addNewServer()
 			return nil
+		case 'c', 'C':
+			t.createNewProfile()
+			return nil
+		case 'x', 'X':
+			t.deleteCurrentProfile()
+			return nil
+		case 'o', 'O':
+			t.editCurrentProfile()
+			return nil
+		case 'i', 'I':
+			t.assignServerToProfile()
+			return nil
+		case 'u', 'U':
+			t.unassignServerFromProfile()
+			return nil
 		}
 		
 		return event
@@ -701,13 +716,22 @@ func (t *TUIApp) showHelp() {
   [yellow]Enter[white]       Connect to server / Attach to session
   [yellow]s[white]           Switch focus between panels
 
-[yellow::b]Actions:[white::-]
+[yellow::b]Server Actions:[white::-]
+  [yellow]a[white]           Add new server
+  [yellow]e[white]           Edit selected server
+  [yellow]d[white]           Delete selected server
+
+[yellow::b]Profile Actions:[white::-]
+  [yellow]c[white]           Create new profile
+  [yellow]o[white]           Edit current profile
+  [yellow]x[white]           Delete current profile
+  [yellow]i[white]           Assign server to current profile
+  [yellow]u[white]           Unassign server from current profile
+
+[yellow::b]General Actions:[white::-]
   [yellow]q[white]           Quit application
   [yellow]?[white]           Show this help
   [yellow]r[white]           Refresh data
-  [yellow]e[white]           Edit selected server
-  [yellow]d[white]           Delete selected server
-  [yellow]a[white]           Add new server
 
 [yellow::b]Profile Navigation (Server panel):[white::-]
   [yellow]Tab[white]         Switch to next profile
@@ -1479,4 +1503,47 @@ func (t *TUIApp) showGroupConnectingModal(profileName string, serverCount int) {
 		SetBackgroundColor(tcell.ColorDarkBlue)
 	
 	t.app.SetRoot(modal, true)
+}
+
+// Profile management action handlers
+
+// createNewProfile handles creating a new profile
+func (t *TUIApp) createNewProfile() {
+	t.ShowCreateProfileModal()
+}
+
+// deleteCurrentProfile handles deleting the currently selected profile
+func (t *TUIApp) deleteCurrentProfile() {
+	if t.currentFilter == "" {
+		t.showErrorModal("No profile selected. Please select a profile first.")
+		return
+	}
+	t.ShowDeleteProfileModal(t.currentFilter)
+}
+
+// editCurrentProfile handles editing the currently selected profile
+func (t *TUIApp) editCurrentProfile() {
+	if t.currentFilter == "" {
+		t.showErrorModal("No profile selected. Please select a profile first.")
+		return
+	}
+	t.ShowEditProfileModal(t.currentFilter)
+}
+
+// assignServerToProfile handles assigning the selected server to the current profile
+func (t *TUIApp) assignServerToProfile() {
+	if t.currentFilter == "" {
+		t.showErrorModal("No profile selected. Please select a profile first.")
+		return
+	}
+	t.ShowServerAssignmentModal(t.currentFilter)
+}
+
+// unassignServerFromProfile handles unassigning the selected server from the current profile
+func (t *TUIApp) unassignServerFromProfile() {
+	if t.currentFilter == "" {
+		t.showErrorModal("No profile selected. Please select a profile first.")
+		return
+	}
+	t.ShowServerUnassignmentModal(t.currentFilter)
 }
