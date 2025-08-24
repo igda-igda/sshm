@@ -33,11 +33,13 @@ type TUIApp struct {
 	config           *config.Config
 	tmuxManager      *tmux.Manager
 	modalManager     *ModalManager
+	sessionHandler   *SessionReturnHandler
 	
 	// Application state
 	running              bool
 	mu                   sync.RWMutex
 	stopChan             chan struct{}
+	refreshTimer         *time.Timer
 	currentFilter        string   // Current profile filter, empty means all servers
 	selectedRow          int      // Currently selected row (0 = header, 1+ = data rows)
 	profileTabs          []string // List of profile tab names including "All"
@@ -70,6 +72,9 @@ func NewTUIApp() (*TUIApp, error) {
 
 	// Initialize modal manager after layout is setup
 	tuiApp.modalManager = NewModalManager(tuiApp.app, tuiApp.layout)
+
+	// Initialize session handler
+	tuiApp.sessionHandler = NewSessionReturnHandler(tuiApp, tuiApp.tmuxManager)
 
 	// Setup global key bindings
 	tuiApp.setupKeyBindings()
@@ -311,6 +316,18 @@ func (t *TUIApp) setupKeyBindings() {
 			return nil
 		case 'i', 'I':
 			t.assignServerToProfile()
+			return nil
+		case 'y', 'Y':
+			// Kill selected session (if in sessions panel) - 'y' for "Yes, kill"
+			if t.focusedPanel == "sessions" {
+				t.killSelectedSession()
+			}
+			return nil
+		case 'z', 'Z':
+			// Cleanup all orphaned sessions - 'z' for "Zap orphaned"
+			if t.focusedPanel == "sessions" {
+				t.cleanupOrphanedSessions()
+			}
 			return nil
 		case 'u', 'U':
 			t.unassignServerFromProfile()
@@ -831,6 +848,9 @@ func (t *TUIApp) Run(ctx context.Context) error {
 	t.running = true
 	t.mu.Unlock()
 
+	// Start automatic session refresh
+	t.startAutoRefresh()
+
 	// Handle context cancellation
 	go func() {
 		select {
@@ -864,9 +884,17 @@ func (t *TUIApp) Stop() {
 		return
 	}
 
+	// Stop automatic refresh
+	t.stopAutoRefresh()
+
 	// Stop the application
 	if t.app != nil {
 		t.app.Stop()
+	}
+
+	// Cleanup session handler if it exists
+	if t.sessionHandler != nil {
+		t.sessionHandler.Cleanup()
 	}
 
 	// Signal stop
@@ -912,6 +940,42 @@ func (t *TUIApp) RefreshConfig() error {
 	return nil
 }
 
+// startAutoRefresh starts automatic session refresh every 5 seconds
+func (t *TUIApp) startAutoRefresh() {
+	if t.refreshTimer != nil {
+		return // Already running
+	}
+	
+	const refreshInterval = 5 * time.Second
+	
+	t.refreshTimer = time.AfterFunc(refreshInterval, func() {
+		if t.running {
+			// Refresh session data in background
+			go func() {
+				if err := t.refreshSessions(); err == nil {
+					// Update UI on main thread
+					t.app.QueueUpdateDraw(func() {
+						// UI update handled by refreshSessions
+					})
+				}
+				
+				// Schedule next refresh
+				if t.running && t.refreshTimer != nil {
+					t.refreshTimer.Reset(refreshInterval)
+				}
+			}()
+		}
+	})
+}
+
+// stopAutoRefresh stops the automatic session refresh
+func (t *TUIApp) stopAutoRefresh() {
+	if t.refreshTimer != nil {
+		t.refreshTimer.Stop()
+		t.refreshTimer = nil
+	}
+}
+
 // refreshSessions refreshes the session display with current tmux sessions
 func (t *TUIApp) refreshSessions() error {
 	if !t.tmuxManager.IsAvailable() {
@@ -929,8 +993,25 @@ func (t *TUIApp) refreshSessions() error {
 		return nil
 	}
 
-	// Parse detailed session information
-	sessions, err := t.getSessionDetails(sessionNames)
+	// Try to use enhanced tmux manager integration first
+	if sessions, err := t.tmuxManager.RefreshSessionInfo(); err == nil {
+		// Convert tmux.SessionInfo to tui.SessionInfo
+		var tuiSessions []SessionInfo
+		for _, tmuxSession := range sessions {
+			tuiSessions = append(tuiSessions, SessionInfo{
+				Name:         tmuxSession.Name,
+				Status:       tmuxSession.Status,
+				Windows:      tmuxSession.Windows,
+				LastActivity: tmuxSession.LastActivity,
+			})
+		}
+		t.sessions = tuiSessions
+		t.updateSessionDisplay(tuiSessions)
+		return nil
+	}
+
+	// Fallback to enhanced session details parsing
+	sessions, err := t.getEnhancedSessionDetails(sessionNames)
 	if err != nil {
 		// If we can't get session details, fall back to basic session names
 		var basicSessions []SessionInfo
@@ -947,7 +1028,7 @@ func (t *TUIApp) refreshSessions() error {
 		return nil
 	}
 
-	// Update the display
+	// Update the display with real-time session information
 	t.sessions = sessions
 	t.updateSessionDisplay(sessions)
 	return nil
@@ -959,6 +1040,28 @@ func (t *TUIApp) getSessionDetails(sessionNames []string) ([]SessionInfo, error)
 
 	for _, name := range sessionNames {
 		sessionInfo, err := t.getDetailedSessionInfo(name)
+		if err != nil {
+			// Fall back to basic info if detailed query fails
+			sessions = append(sessions, SessionInfo{
+				Name:         name,
+				Status:       "active",
+				Windows:      1,
+				LastActivity: "unknown",
+			})
+		} else {
+			sessions = append(sessions, sessionInfo)
+		}
+	}
+
+	return sessions, nil
+}
+
+// getEnhancedSessionDetails retrieves enhanced detailed information for each session with real-time monitoring
+func (t *TUIApp) getEnhancedSessionDetails(sessionNames []string) ([]SessionInfo, error) {
+	var sessions []SessionInfo
+
+	for _, name := range sessionNames {
+		sessionInfo, err := t.getEnhancedDetailedSessionInfo(name)
 		if err != nil {
 			// Fall back to basic info if detailed query fails
 			sessions = append(sessions, SessionInfo{
@@ -996,6 +1099,33 @@ func (t *TUIApp) getDetailedSessionInfo(sessionName string) (SessionInfo, error)
 
 	// Try to get last activity time
 	if activity, err := t.getSessionActivity(sessionName); err == nil {
+		sessionInfo.LastActivity = activity
+	}
+
+	return sessionInfo, nil
+}
+
+// getEnhancedDetailedSessionInfo gets enhanced detailed information for a specific session with real-time monitoring
+func (t *TUIApp) getEnhancedDetailedSessionInfo(sessionName string) (SessionInfo, error) {
+	sessionInfo := SessionInfo{
+		Name:         sessionName,
+		Status:       "active", // Default
+		Windows:      1,        // Default
+		LastActivity: "unknown", // Default
+	}
+
+	// Try to get enhanced window count using tmux list-windows with more details
+	if windowCount, err := t.getEnhancedSessionWindowCount(sessionName); err == nil {
+		sessionInfo.Windows = windowCount
+	}
+
+	// Try to get enhanced session status with attachment detection
+	if status, err := t.getEnhancedSessionStatus(sessionName); err == nil {
+		sessionInfo.Status = status
+	}
+
+	// Try to get enhanced last activity time with better formatting
+	if activity, err := t.getEnhancedSessionActivity(sessionName); err == nil {
 		sessionInfo.LastActivity = activity
 	}
 
@@ -1059,6 +1189,88 @@ func (t *TUIApp) getSessionActivity(sessionName string) (string, error) {
 	return "unknown", nil
 }
 
+// getEnhancedSessionWindowCount returns the enhanced number of windows for a session with better detection
+func (t *TUIApp) getEnhancedSessionWindowCount(sessionName string) (int, error) {
+	// Use tmux list-windows with enhanced format to count windows in the session
+	cmd := fmt.Sprintf("tmux list-windows -t %s -F '#{window_index}' 2>/dev/null | wc -l", sessionName)
+	output, err := t.executeCommand(cmd)
+	if err != nil {
+		return 1, err
+	}
+	
+	count, err := strconv.Atoi(strings.TrimSpace(output))
+	if err != nil {
+		return 1, err
+	}
+	
+	return count, nil
+}
+
+// getEnhancedSessionStatus returns enhanced session status with more detailed attachment information
+func (t *TUIApp) getEnhancedSessionStatus(sessionName string) (string, error) {
+	// Use tmux list-sessions with enhanced format to check detailed session status
+	cmd := fmt.Sprintf("tmux list-sessions -F '#{session_name} #{session_attached} #{session_many_attached}' 2>/dev/null | grep '^%s '", sessionName)
+	output, err := t.executeCommand(cmd)
+	if err != nil {
+		return "active", err
+	}
+	
+	fields := strings.Fields(output)
+	if len(fields) >= 3 {
+		attached := fields[1]
+		manyAttached := fields[2]
+		
+		if attached == "1" && manyAttached == "1" {
+			return "multi-attached", nil
+		} else if attached == "1" {
+			return "attached", nil
+		}
+	}
+	
+	return "detached", nil
+}
+
+// getEnhancedSessionActivity returns enhanced last activity time with better formatting and relative time
+func (t *TUIApp) getEnhancedSessionActivity(sessionName string) (string, error) {
+	// Use tmux list-sessions with enhanced format to get detailed activity time
+	cmd := fmt.Sprintf("tmux list-sessions -F '#{session_name} #{session_activity} #{session_activity_string}' 2>/dev/null | grep '^%s '", sessionName)
+	output, err := t.executeCommand(cmd)
+	if err != nil {
+		return "unknown", err
+	}
+	
+	fields := strings.Fields(output)
+	if len(fields) >= 3 {
+		// Convert unix timestamp to relative time
+		if timestamp, err := strconv.ParseInt(fields[1], 10, 64); err == nil {
+			activityTime := time.Unix(timestamp, 0)
+			now := time.Now()
+			
+			// Calculate relative time
+			diff := now.Sub(activityTime)
+			if diff < time.Minute {
+				return "just now", nil
+			} else if diff < time.Hour {
+				minutes := int(diff.Minutes())
+				return fmt.Sprintf("%dm ago", minutes), nil
+			} else if diff < 24*time.Hour {
+				hours := int(diff.Hours())
+				return fmt.Sprintf("%dh ago", hours), nil
+			} else {
+				days := int(diff.Hours() / 24)
+				return fmt.Sprintf("%dd ago", days), nil
+			}
+		}
+		
+		// Fallback to session activity string if available
+		if len(fields) >= 4 {
+			return strings.Join(fields[3:], " "), nil
+		}
+	}
+	
+	return "unknown", nil
+}
+
 // executeCommand executes a shell command and returns output (helper for tmux queries)
 func (t *TUIApp) executeCommand(cmd string) (string, error) {
 	// This is a simplified implementation
@@ -1113,15 +1325,19 @@ func (t *TUIApp) updateSessionDisplay(sessions []SessionInfo) {
 	for i, session := range sessions {
 		row := i + 1 // Skip header row
 		
-		// Determine status color
+		// Determine status color with enhanced status support
 		statusColor := tcell.ColorGray
 		switch session.Status {
-		case "active":
+		case "active", "detached":
 			statusColor = tcell.ColorGreen
 		case "attached":
 			statusColor = tcell.ColorYellow  
+		case "multi-attached":
+			statusColor = tcell.ColorOrange
 		case "inactive":
 			statusColor = tcell.ColorRed
+		default:
+			statusColor = tcell.ColorGray
 		}
 
 		t.sessionPanel.SetCell(row, 0, tview.NewTableCell(session.Name).SetTextColor(tcell.ColorWhite).SetAlign(tview.AlignLeft))
@@ -1189,15 +1405,153 @@ func (t *TUIApp) attachToSelectedSession() {
 	sessionIndex := currentRow - 1 // Convert to zero-based index
 	sessionName := t.sessions[sessionIndex].Name
 	
-	// Stop the TUI application before attaching
-	t.Stop()
-	
-	// Attach to the session
-	err := t.tmuxManager.AttachSession(sessionName)
+	// Use the session handler for enhanced attachment with TUI return
+	err := t.sessionHandler.AttachToSessionWithReturn(sessionName)
 	if err != nil {
-		// If attachment fails, show error modal and restart TUI
+		// If attachment fails, show error modal
 		t.showSessionErrorModal(fmt.Sprintf("Failed to attach to session '%s': %s", sessionName, err.Error()))
 	}
+}
+
+// killSelectedSession kills/terminates the currently selected session
+func (t *TUIApp) killSelectedSession() {
+	if t.sessionPanel == nil {
+		return
+	}
+	
+	currentRow, _ := t.sessionPanel.GetSelection()
+	if currentRow <= 0 || currentRow > len(t.sessions) {
+		return // Header row selected or invalid selection
+	}
+	
+	// Get session name from the selected row
+	sessionIndex := currentRow - 1 // Convert to zero-based index
+	sessionName := t.sessions[sessionIndex].Name
+	
+	// Show confirmation modal
+	message := fmt.Sprintf("Are you sure you want to kill session '%s'?\n\nThis will terminate all processes in the session and cannot be undone.", sessionName)
+	
+	modal := tview.NewModal().
+		SetText(message).
+		AddButtons([]string{"Kill Session", "Cancel"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			t.modalManager.HideModal()
+			if buttonIndex == 0 { // Kill Session button
+				err := t.tmuxManager.KillSession(sessionName)
+				if err != nil {
+					t.showSessionErrorModal(fmt.Sprintf("Failed to kill session '%s': %s", sessionName, err.Error()))
+				} else {
+					// Refresh sessions to reflect the change
+					t.refreshSessions()
+					// Show success message
+					t.modalManager.ShowInfoModal("Session Killed", fmt.Sprintf("Session '%s' has been terminated successfully.", sessionName))
+				}
+			}
+		}).
+		SetBackgroundColor(tcell.ColorDarkRed)
+	
+	modal.SetTitle(" Kill Session ")
+	t.modalManager.ShowModal(modal)
+}
+
+// cleanupOrphanedSessions removes sessions that are no longer valid or accessible
+func (t *TUIApp) cleanupOrphanedSessions() {
+	if t.sessionPanel == nil {
+		return
+	}
+	
+	// Show confirmation modal
+	message := "This will clean up orphaned and inaccessible sessions.\n\nOrphaned sessions are those that:\n• Have no active processes\n• Cannot be attached to\n• Are corrupted or invalid\n\nDo you want to proceed?"
+	
+	modal := tview.NewModal().
+		SetText(message).
+		AddButtons([]string{"Cleanup", "Cancel"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			t.modalManager.HideModal()
+			if buttonIndex == 0 { // Cleanup button
+				count, err := t.performSessionCleanup()
+				if err != nil {
+					t.showSessionErrorModal(fmt.Sprintf("Session cleanup failed: %s", err.Error()))
+				} else {
+					// Refresh sessions to reflect the changes
+					t.refreshSessions()
+					// Show success message
+					if count > 0 {
+						t.modalManager.ShowInfoModal("Cleanup Complete", fmt.Sprintf("Successfully cleaned up %d orphaned session(s).", count))
+					} else {
+						t.modalManager.ShowInfoModal("Cleanup Complete", "No orphaned sessions found to clean up.")
+					}
+				}
+			}
+		}).
+		SetBackgroundColor(tcell.ColorDarkBlue)
+	
+	modal.SetTitle(" Cleanup Sessions ")
+	t.modalManager.ShowModal(modal)
+}
+
+// performSessionCleanup performs the actual cleanup of orphaned sessions
+func (t *TUIApp) performSessionCleanup() (int, error) {
+	if !t.tmuxManager.IsAvailable() {
+		return 0, fmt.Errorf("tmux is not available")
+	}
+	
+	// Get all current sessions
+	sessionNames, err := t.tmuxManager.ListSessions()
+	if err != nil {
+		return 0, fmt.Errorf("failed to list sessions: %w", err)
+	}
+	
+	cleanedCount := 0
+	
+	// Check each session for orphaned status
+	for _, sessionName := range sessionNames {
+		if t.isSessionOrphaned(sessionName) {
+			if err := t.tmuxManager.KillSession(sessionName); err != nil {
+				// Log error but continue with other sessions
+				continue
+			}
+			cleanedCount++
+		}
+	}
+	
+	return cleanedCount, nil
+}
+
+// isSessionOrphaned checks if a session is orphaned and should be cleaned up
+func (t *TUIApp) isSessionOrphaned(sessionName string) bool {
+	// Try to get detailed session information
+	sessionInfo, err := t.getEnhancedDetailedSessionInfo(sessionName)
+	if err != nil {
+		// If we can't get session info, it might be orphaned
+		return true
+	}
+	
+	// Check for indicators of orphaned sessions
+	// 1. Sessions with no windows
+	if sessionInfo.Windows == 0 {
+		return true
+	}
+	
+	// 2. Sessions that haven't had activity for more than 24 hours
+	if strings.Contains(sessionInfo.LastActivity, "d ago") {
+		// Parse days and check if > 1
+		if strings.Contains(sessionInfo.LastActivity, "2d ago") || 
+		   strings.Contains(sessionInfo.LastActivity, "3d ago") ||
+		   strings.Contains(sessionInfo.LastActivity, "4d ago") ||
+		   strings.Contains(sessionInfo.LastActivity, "5d ago") ||
+		   strings.Contains(sessionInfo.LastActivity, "6d ago") ||
+		   strings.Contains(sessionInfo.LastActivity, "7d ago") {
+			return true
+		}
+	}
+	
+	// 3. Sessions with "inactive" status
+	if sessionInfo.Status == "inactive" {
+		return true
+	}
+	
+	return false
 }
 
 // showSessionErrorModal displays an error modal for session operations

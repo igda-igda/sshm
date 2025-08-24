@@ -551,3 +551,33 @@ func (mm *ModalManager) ClearAllModals() {
 	mm.app.SetRoot(mm.layout, true)
 	mm.app.SetFocus(mm.layout)
 }
+
+// ShowInfoModal displays an informational modal with title and message
+func (mm *ModalManager) ShowInfoModal(title, message string) {
+	modal := tview.NewModal().
+		SetText(message).
+		AddButtons([]string{"OK"}).
+		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+			mm.HideModal()
+		}).
+		SetBackgroundColor(tcell.ColorDarkGreen)
+	
+	// Add consistent keyboard handling
+	modal.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEnter:
+			mm.HideModal()
+			return nil
+		case tcell.KeyEscape:
+			mm.HideModal()
+			return nil
+		}
+		return event
+	})
+	
+	if title != "" {
+		modal.SetTitle(" " + title + " ")
+	}
+	
+	mm.ShowModal(modal)
+}

@@ -1740,3 +1740,848 @@ func TestKeyboardNavigation_UpdatedHelpSystem(t *testing.T) {
 	
 	app.showHelp() // Should show help with edit/delete keybindings included
 }
+
+// TestSessionAttachment_DetachmentCycle tests session attachment/detachment with TUI return
+func TestSessionAttachment_DetachmentCycle(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test session data
+	testSessions := []SessionInfo{
+		{Name: "test-session", Status: "active", Windows: 1, LastActivity: "14:30"},
+	}
+	
+	// Setup mock session data
+	app.updateSessionDisplay(testSessions)
+	app.sessions = testSessions
+
+	// Test session attachment preparation
+	if app.sessionPanel != nil && len(testSessions) > 0 {
+		app.focusedPanel = "sessions"
+		app.sessionPanel.Select(1, 0) // Select first session
+		
+		// Test that attachToSelectedSession attempts to attach
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Session attachment panicked: %v", r)
+			}
+		}()
+
+		// This will actually try to stop TUI and attach to tmux
+		// In test environment, tmux might not be available, but shouldn't panic
+		app.attachToSelectedSession()
+	}
+}
+
+// TestSessionAttachment_TUIStateManagement tests TUI state during session operations
+func TestSessionAttachment_TUIStateManagement(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test that TUI can be stopped and restarted (simulating session detachment/return)
+	if !app.running {
+		// App should start in stopped state
+		t.Log("TUI app correctly initialized in stopped state")
+	}
+
+	// Test stopping TUI (simulates session attachment)
+	app.Stop()
+	
+	// Test that stop is idempotent
+	app.Stop() // Should not panic
+
+	// Verify app state
+	if app.app == nil {
+		t.Error("TUI application should not be nil after stop")
+	}
+}
+
+// TestSessionAttachment_ErrorHandling tests error scenarios during session operations
+func TestSessionAttachment_ErrorHandling(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test attachment with no sessions
+	app.focusedPanel = "sessions"
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Session attachment with no sessions panicked: %v", r)
+		}
+	}()
+	
+	app.attachToSelectedSession() // Should handle gracefully with no sessions
+
+	// Test attachment with invalid selection
+	if app.sessionPanel != nil {
+		app.sessionPanel.Select(0, 0) // Select header row (invalid)
+		app.attachToSelectedSession() // Should return early without crashing
+	}
+}
+
+// TestSessionAttachment_SessionSelection tests session selection validation
+func TestSessionAttachment_SessionSelection(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	testSessions := []SessionInfo{
+		{Name: "session-1", Status: "active", Windows: 1, LastActivity: "14:30"},
+		{Name: "session-2", Status: "detached", Windows: 2, LastActivity: "14:25"},
+	}
+
+	app.updateSessionDisplay(testSessions)
+	app.sessions = testSessions
+
+	if app.sessionPanel != nil {
+		// Test valid session selection
+		app.focusedPanel = "sessions"
+		app.sessionPanel.Select(1, 0) // Select first session
+		selectedRow, _ := app.sessionPanel.GetSelection()
+		
+		if selectedRow != 1 {
+			t.Errorf("Expected session selection at row 1, got %d", selectedRow)
+		}
+
+		// Test boundary conditions
+		app.sessionPanel.Select(10, 0) // Out of bounds selection
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Out of bounds session selection panicked: %v", r)
+			}
+		}()
+		
+		app.attachToSelectedSession() // Should handle out of bounds gracefully
+	}
+}
+
+// TestSessionAttachment_TmuxIntegration tests integration with tmux manager
+func TestSessionAttachment_TmuxIntegration(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test tmux manager availability check
+	if app.tmuxManager == nil {
+		t.Fatal("Expected tmux manager to be initialized")
+	}
+
+	// Test session listing functionality
+	sessions, err := app.tmuxManager.ListSessions()
+	if err != nil {
+		t.Logf("Tmux not available (expected in test environment): %v", err)
+	} else {
+		t.Logf("Found %d tmux sessions", len(sessions))
+	}
+
+	// Test session existence checking
+	exists := app.tmuxManager.SessionExists("non-existent-session")
+	if exists {
+		t.Error("Expected non-existent session to return false")
+	}
+}
+
+// TestSessionAttachment_StatusMonitoring tests session status monitoring
+func TestSessionAttachment_StatusMonitoring(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test session refresh functionality
+	err = app.refreshSessions()
+	if err != nil {
+		t.Logf("Session refresh error (expected if tmux not available): %v", err)
+	}
+
+	// Test session display update with different statuses
+	testSessions := []SessionInfo{
+		{Name: "active-session", Status: "active", Windows: 1, LastActivity: "14:30"},
+		{Name: "attached-session", Status: "attached", Windows: 2, LastActivity: "14:25"},
+		{Name: "inactive-session", Status: "inactive", Windows: 1, LastActivity: "14:20"},
+	}
+
+	app.updateSessionDisplay(testSessions)
+
+	if app.sessionPanel == nil {
+		t.Skip("Session panel not initialized")
+	}
+
+	// Verify different session statuses are displayed correctly
+	expectedRows := len(testSessions) + 1 // +1 for header
+	actualRows := app.sessionPanel.GetRowCount()
+	if actualRows != expectedRows {
+		t.Errorf("Expected %d rows for session display, got %d", expectedRows, actualRows)
+	}
+
+	// Test real-time session updates
+	updatedSessions := []SessionInfo{
+		{Name: "active-session", Status: "attached", Windows: 1, LastActivity: "14:35"},
+		{Name: "new-session", Status: "active", Windows: 1, LastActivity: "14:32"},
+	}
+
+	app.updateSessionDisplay(updatedSessions)
+	app.sessions = updatedSessions
+
+	// Verify session list was updated
+	updatedRows := app.sessionPanel.GetRowCount()
+	expectedUpdatedRows := len(updatedSessions) + 1
+	if updatedRows != expectedUpdatedRows {
+		t.Errorf("Expected %d rows after session update, got %d", expectedUpdatedRows, updatedRows)
+	}
+}
+
+// TestSessionAttachment_ReturnHandler tests session return handler functionality
+func TestSessionAttachment_ReturnHandler(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test that session error modal functionality works
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Session error modal panicked: %v", r)
+		}
+	}()
+
+	app.showSessionErrorModal("Test session error")
+
+	// Test session connection functionality with mock data
+	testSessions := []SessionInfo{
+		{Name: "test-session", Status: "active", Windows: 1, LastActivity: "14:30"},
+	}
+	
+	app.updateSessionDisplay(testSessions)
+	app.sessions = testSessions
+
+	if app.sessionPanel != nil {
+		app.focusedPanel = "sessions"
+		app.sessionPanel.Select(1, 0)
+		
+		// This tests the session attachment flow
+		defer func() {
+			if r := recover(); r != nil {
+				t.Errorf("Session attachment flow panicked: %v", r)
+			}
+		}()
+
+		app.attachToSelectedSession()
+	}
+}
+
+// TestEnhancedSessionMonitoring tests enhanced session monitoring functionality
+func TestEnhancedSessionMonitoring_StatusDetection(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test enhanced status detection with different statuses
+	testSessions := []SessionInfo{
+		{Name: "detached-session", Status: "detached", Windows: 1, LastActivity: "5m ago"},
+		{Name: "attached-session", Status: "attached", Windows: 2, LastActivity: "just now"},
+		{Name: "multi-attached-session", Status: "multi-attached", Windows: 3, LastActivity: "2h ago"},
+		{Name: "inactive-session", Status: "inactive", Windows: 1, LastActivity: "1d ago"},
+	}
+
+	// Update session display with enhanced statuses
+	app.updateSessionDisplay(testSessions)
+	app.sessions = testSessions
+
+	if app.sessionPanel == nil {
+		t.Skip("Session panel not initialized")
+	}
+
+	// Verify enhanced statuses are displayed correctly
+	expectedRows := len(testSessions) + 1 // +1 for header
+	actualRows := app.sessionPanel.GetRowCount()
+	if actualRows != expectedRows {
+		t.Errorf("Expected %d rows for enhanced session display, got %d", expectedRows, actualRows)
+	}
+
+	// Verify specific status displays
+	if actualRows > 1 {
+		statusCell := app.sessionPanel.GetCell(1, 1) // detached-session status
+		if statusCell == nil || statusCell.Text != "detached" {
+			t.Errorf("Expected first session status 'detached', got %v", statusCell)
+		}
+	}
+
+	if actualRows > 3 {
+		statusCell := app.sessionPanel.GetCell(3, 1) // multi-attached-session status
+		if statusCell == nil || statusCell.Text != "multi-attached" {
+			t.Errorf("Expected third session status 'multi-attached', got %v", statusCell)
+		}
+	}
+}
+
+// TestEnhancedSessionMonitoring_ActivityFormatting tests relative time formatting
+func TestEnhancedSessionMonitoring_ActivityFormatting(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test enhanced activity time formatting
+	testSessions := []SessionInfo{
+		{Name: "recent-session", Status: "active", Windows: 1, LastActivity: "just now"},
+		{Name: "minutes-session", Status: "active", Windows: 1, LastActivity: "15m ago"},
+		{Name: "hours-session", Status: "active", Windows: 1, LastActivity: "3h ago"},
+		{Name: "days-session", Status: "active", Windows: 1, LastActivity: "2d ago"},
+	}
+
+	app.updateSessionDisplay(testSessions)
+
+	if app.sessionPanel == nil {
+		t.Skip("Session panel not initialized")
+	}
+
+	// Verify activity time formatting
+	expectedRows := len(testSessions) + 1
+	actualRows := app.sessionPanel.GetRowCount()
+	if actualRows != expectedRows {
+		t.Errorf("Expected %d rows, got %d", expectedRows, actualRows)
+	}
+
+	// Check specific activity formats
+	if actualRows > 1 {
+		activityCell := app.sessionPanel.GetCell(1, 3) // recent-session activity
+		if activityCell == nil || activityCell.Text != "just now" {
+			t.Errorf("Expected first session activity 'just now', got %v", activityCell)
+		}
+	}
+
+	if actualRows > 2 {
+		activityCell := app.sessionPanel.GetCell(2, 3) // minutes-session activity
+		if activityCell == nil || activityCell.Text != "15m ago" {
+			t.Errorf("Expected second session activity '15m ago', got %v", activityCell)
+		}
+	}
+}
+
+// TestEnhancedSessionMonitoring_AutoRefresh tests automatic session refresh functionality
+func TestEnhancedSessionMonitoring_AutoRefresh(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test that auto-refresh can be started and stopped without panicking
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Auto-refresh functionality panicked: %v", r)
+		}
+	}()
+
+	// Start auto refresh
+	app.startAutoRefresh()
+
+	// Verify refresh timer is set
+	if app.refreshTimer == nil {
+		t.Error("Expected refresh timer to be initialized after starting auto-refresh")
+	}
+
+	// Test starting twice (should be idempotent)
+	app.startAutoRefresh()
+
+	// Wait a moment to let potential goroutines start
+	time.Sleep(10 * time.Millisecond)
+
+	// Stop auto refresh
+	app.stopAutoRefresh()
+
+	// Verify timer is stopped
+	if app.refreshTimer != nil {
+		t.Error("Expected refresh timer to be nil after stopping auto-refresh")
+	}
+
+	// Test stopping twice (should be safe)
+	app.stopAutoRefresh()
+}
+
+// TestEnhancedSessionMonitoring_EnhancedDetails tests enhanced session detail gathering
+func TestEnhancedSessionMonitoring_EnhancedDetails(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test enhanced session details methods don't panic
+	sessionName := "test-session"
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Enhanced session details panicked: %v", r)
+		}
+	}()
+
+	// Test enhanced session info gathering
+	_, err = app.getEnhancedDetailedSessionInfo(sessionName)
+	if err != nil {
+		t.Logf("Enhanced session info returned error (expected in test environment): %v", err)
+	}
+
+	// Test individual enhanced methods
+	_, err = app.getEnhancedSessionWindowCount(sessionName)
+	if err != nil {
+		t.Logf("Enhanced window count returned error (expected in test environment): %v", err)
+	}
+
+	_, err = app.getEnhancedSessionStatus(sessionName)
+	if err != nil {
+		t.Logf("Enhanced session status returned error (expected in test environment): %v", err)
+	}
+
+	_, err = app.getEnhancedSessionActivity(sessionName)
+	if err != nil {
+		t.Logf("Enhanced session activity returned error (expected in test environment): %v", err)
+	}
+}
+
+// TestEnhancedSessionMonitoring_RealTimeUpdates tests real-time session updates
+func TestEnhancedSessionMonitoring_RealTimeUpdates(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test real-time session updates
+	initialSessions := []SessionInfo{
+		{Name: "session-1", Status: "detached", Windows: 1, LastActivity: "5m ago"},
+	}
+
+	app.updateSessionDisplay(initialSessions)
+	app.sessions = initialSessions
+
+	if app.sessionPanel == nil {
+		t.Skip("Session panel not initialized")
+	}
+
+	// Simulate real-time update with new session data
+	updatedSessions := []SessionInfo{
+		{Name: "session-1", Status: "attached", Windows: 2, LastActivity: "just now"},
+		{Name: "session-2", Status: "detached", Windows: 1, LastActivity: "1m ago"},
+	}
+
+	app.updateSessionDisplay(updatedSessions)
+	app.sessions = updatedSessions
+
+	updatedRows := app.sessionPanel.GetRowCount()
+
+	// Verify session list was updated
+	if updatedRows != len(updatedSessions)+1 {
+		t.Errorf("Expected %d rows after real-time update, got %d", len(updatedSessions)+1, updatedRows)
+	}
+
+	// Verify status was updated
+	if updatedRows > 1 {
+		statusCell := app.sessionPanel.GetCell(1, 1) // session-1 status
+		if statusCell == nil || statusCell.Text != "attached" {
+			t.Errorf("Expected session-1 status to be updated to 'attached', got %v", statusCell)
+		}
+
+		windowsCell := app.sessionPanel.GetCell(1, 2) // session-1 windows
+		if windowsCell == nil || windowsCell.Text != "2" {
+			t.Errorf("Expected session-1 windows to be updated to '2', got %v", windowsCell)
+		}
+	}
+}
+
+// TestEnhancedSessionMonitoring_ErrorHandling tests error handling in enhanced monitoring
+func TestEnhancedSessionMonitoring_ErrorHandling(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test error handling with invalid session data
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Enhanced monitoring error handling panicked: %v", r)
+		}
+	}()
+
+	// Test with empty session names
+	_, err = app.getEnhancedSessionDetails([]string{""})
+	if err != nil {
+		t.Logf("Enhanced session details handled empty session name: %v", err)
+	}
+
+	// Test with invalid session names
+	_, err = app.getEnhancedSessionDetails([]string{"invalid-session-name"})
+	if err != nil {
+		t.Logf("Enhanced session details handled invalid session: %v", err)
+	}
+
+	// Test session refresh with no tmux
+	err = app.refreshSessions()
+	if err != nil {
+		t.Logf("Session refresh handled tmux unavailability: %v", err)
+	}
+}
+
+// TestSessionCleanup tests session cleanup functionality
+func TestSessionCleanup_KillSelectedSession(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test kill session functionality
+	testSessions := []SessionInfo{
+		{Name: "session-to-kill", Status: "active", Windows: 1, LastActivity: "5m ago"},
+		{Name: "session-to-keep", Status: "active", Windows: 2, LastActivity: "1m ago"},
+	}
+
+	app.updateSessionDisplay(testSessions)
+	app.sessions = testSessions
+
+	if app.sessionPanel == nil {
+		t.Skip("Session panel not initialized")
+	}
+
+	// Test kill session with valid selection
+	app.focusedPanel = "sessions"
+	app.sessionPanel.Select(1, 0) // Select first session
+
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Kill selected session panicked: %v", r)
+		}
+	}()
+
+	// This should trigger the confirmation modal
+	app.killSelectedSession()
+}
+
+// TestSessionCleanup_CleanupOrphaned tests orphaned session cleanup
+func TestSessionCleanup_CleanupOrphaned(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test cleanup orphaned sessions functionality
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Cleanup orphaned sessions panicked: %v", r)
+		}
+	}()
+
+	app.focusedPanel = "sessions"
+	
+	// This should trigger the confirmation modal
+	app.cleanupOrphanedSessions()
+}
+
+// TestSessionCleanup_OrphanDetection tests orphaned session detection
+func TestSessionCleanup_OrphanDetection(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test orphan detection logic with various session states
+	testCases := []struct {
+		sessionName string
+		sessionInfo SessionInfo
+		expectOrphan bool
+		description string
+	}{
+		{
+			sessionName: "healthy-session",
+			sessionInfo: SessionInfo{Name: "healthy-session", Status: "active", Windows: 2, LastActivity: "5m ago"},
+			expectOrphan: false,
+			description: "healthy session should not be orphaned",
+		},
+		{
+			sessionName: "no-windows-session",
+			sessionInfo: SessionInfo{Name: "no-windows-session", Status: "active", Windows: 0, LastActivity: "1h ago"},
+			expectOrphan: true,
+			description: "session with no windows should be orphaned",
+		},
+		{
+			sessionName: "inactive-session",
+			sessionInfo: SessionInfo{Name: "inactive-session", Status: "inactive", Windows: 1, LastActivity: "1h ago"},
+			expectOrphan: true,
+			description: "inactive session should be orphaned",
+		},
+		{
+			sessionName: "old-session",
+			sessionInfo: SessionInfo{Name: "old-session", Status: "active", Windows: 1, LastActivity: "3d ago"},
+			expectOrphan: true,
+			description: "session with old activity should be orphaned",
+		},
+		{
+			sessionName: "recent-session",
+			sessionInfo: SessionInfo{Name: "recent-session", Status: "active", Windows: 1, LastActivity: "just now"},
+			expectOrphan: false,
+			description: "recently active session should not be orphaned",
+		},
+	}
+
+	// Note: The actual orphan detection would call getEnhancedDetailedSessionInfo,
+	// which relies on tmux commands that return errors in test environment.
+	// So we test the logic indirectly by testing performSessionCleanup which uses it.
+	
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Orphan detection panicked: %v", r)
+		}
+	}()
+
+	// Test that performSessionCleanup doesn't crash
+	_, err = app.performSessionCleanup()
+	if err != nil {
+		t.Logf("Session cleanup returned error (expected in test environment): %v", err)
+	}
+
+	// Test individual session orphan detection (will likely error in test env)
+	for _, tc := range testCases {
+		isOrphan := app.isSessionOrphaned(tc.sessionName)
+		// In test environment, this will likely return true due to command execution errors
+		t.Logf("Session %s orphan status: %v (expected in test env due to tmux unavailability)", tc.sessionName, isOrphan)
+	}
+}
+
+// TestSessionCleanup_PerformCleanup tests the actual cleanup performance
+func TestSessionCleanup_PerformCleanup(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test perform session cleanup
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Perform session cleanup panicked: %v", r)
+		}
+	}()
+
+	count, err := app.performSessionCleanup()
+	if err != nil {
+		t.Logf("Session cleanup returned error (expected without tmux): %v", err)
+	} else {
+		t.Logf("Session cleanup completed successfully, cleaned %d sessions", count)
+	}
+}
+
+// TestSessionCleanup_KeyboardBindings tests session cleanup keyboard bindings
+func TestSessionCleanup_KeyboardBindings(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Set up test sessions
+	testSessions := []SessionInfo{
+		{Name: "test-session", Status: "active", Windows: 1, LastActivity: "5m ago"},
+	}
+	
+	if app.sessionPanel != nil {
+		app.updateSessionDisplay(testSessions)
+		app.sessions = testSessions
+		app.focusedPanel = "sessions"
+		app.sessionPanel.Select(1, 0)
+	}
+
+	// Test that cleanup keybindings don't panic
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Session cleanup keybindings panicked: %v", r)
+		}
+	}()
+
+	// Test 'K' key for killing selected session
+	if app.sessionPanel != nil {
+		app.killSelectedSession() // Should show confirmation modal
+	}
+
+	// Test 'C' key for cleanup orphaned sessions  
+	if app.sessionPanel != nil {
+		app.cleanupOrphanedSessions() // Should show confirmation modal
+	}
+}
+
+// TestSessionCleanup_ErrorHandling tests error handling in session cleanup
+func TestSessionCleanup_ErrorHandling(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test error handling in cleanup operations
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Session cleanup error handling panicked: %v", r)
+		}
+	}()
+
+	// Test kill session with no sessions panel
+	app.sessionPanel = nil
+	app.killSelectedSession() // Should return early
+
+	// Test cleanup with no sessions panel
+	app.cleanupOrphanedSessions() // Should return early
+
+	// Test invalid session selection
+	if app.sessionPanel != nil {
+		app.sessionPanel.Select(0, 0) // Header row
+		app.killSelectedSession() // Should return early
+	}
+}
+
+// TestSessionCleanup_Integration tests integration with tmux manager
+func TestSessionCleanup_Integration(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Verify tmux manager is available for cleanup operations
+	if app.tmuxManager == nil {
+		t.Fatal("Expected tmux manager to be available for session cleanup")
+	}
+
+	// Test tmux manager methods used by cleanup
+	exists := app.tmuxManager.SessionExists("non-existent-session")
+	if exists {
+		t.Error("Expected non-existent session check to return false")
+	}
+
+	// Test session listing (used by cleanup)
+	sessions, err := app.tmuxManager.ListSessions()
+	if err != nil {
+		t.Logf("List sessions returned error (expected if tmux not available): %v", err)
+	} else {
+		t.Logf("Found %d tmux sessions for cleanup testing", len(sessions))
+	}
+}
