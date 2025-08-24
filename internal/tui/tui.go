@@ -315,6 +315,12 @@ func (t *TUIApp) setupKeyBindings() {
 		case 'u', 'U':
 			t.unassignServerFromProfile()
 			return nil
+		case 'm', 'M':
+			t.ShowImportModal()
+			return nil
+		case 'w', 'W':
+			t.ShowExportModal()
+			return nil
 		}
 		
 		return event
@@ -732,6 +738,8 @@ func (t *TUIApp) showHelp() {
   [yellow]q[white]           Quit application
   [yellow]?[white]           Show this help
   [yellow]r[white]           Refresh data
+  [yellow]m[white]           Import configuration
+  [yellow]w[white]           Export configuration
 
 [yellow::b]Profile Navigation (Server panel):[white::-]
   [yellow]Tab[white]         Switch to next profile
