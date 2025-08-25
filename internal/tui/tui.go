@@ -34,6 +34,7 @@ type TUIApp struct {
 	tmuxManager      *tmux.Manager
 	modalManager     *ModalManager
 	sessionHandler   *SessionReturnHandler
+	helpSystem       *HelpSystem
 	
 	// Application state
 	running              bool
@@ -75,6 +76,9 @@ func NewTUIApp() (*TUIApp, error) {
 
 	// Initialize session handler
 	tuiApp.sessionHandler = NewSessionReturnHandler(tuiApp, tuiApp.tmuxManager)
+
+	// Initialize enhanced help system
+	tuiApp.helpSystem = NewHelpSystem(tuiApp)
 
 	// Setup global key bindings
 	tuiApp.setupKeyBindings()
@@ -730,58 +734,38 @@ func (t *TUIApp) updateStatusBar(serverCount int) {
 	t.statusBar.SetText(statusText)
 }
 
-// showHelp displays a help modal
+// showHelp displays context-sensitive help using the enhanced help system
 func (t *TUIApp) showHelp() {
-	helpText := `[::b]SSHM TUI Help[::-]
+	if t.helpSystem != nil {
+		t.helpSystem.ShowHelp()
+	} else {
+		// Fallback to basic help if help system not initialized
+		t.showBasicHelp()
+	}
+}
 
-[yellow::b]Navigation:[white::-]
-  [yellow]↑/↓, j/k[white]    Navigate lists
-  [yellow]Enter[white]       Connect to server / Attach to session
-  [yellow]s[white]           Switch focus between panels
+// showBasicHelp displays basic help as fallback
+func (t *TUIApp) showBasicHelp() {
+	helpText := `[aqua::b]SSHM TUI Help[::-]
 
-[yellow::b]Server Actions:[white::-]
-  [yellow]a[white]           Add new server
-  [yellow]e[white]           Edit selected server
-  [yellow]d[white]           Delete selected server
+[yellow::b]⚡ Navigation:[white::-]
+  [lime]↑/↓, j/k[white]    Navigate lists
+  [lime]Enter[white]       Connect to server / Attach to session
+  [lime]s[white]           Switch focus between panels
 
-[yellow::b]Profile Actions:[white::-]
-  [yellow]c[white]           Create new profile
-  [yellow]o[white]           Edit current profile
-  [yellow]x[white]           Delete current profile
-  [yellow]i[white]           Assign server to current profile
-  [yellow]u[white]           Unassign server from current profile
+[yellow::b]🖥️  Server Actions:[white::-]
+  [lime]a[white]           Add new server
+  [lime]e[white]           Edit selected server
+  [lime]d[white]           Delete selected server
 
-[yellow::b]General Actions:[white::-]
-  [yellow]q[white]           Quit application
-  [yellow]?[white]           Show this help
-  [yellow]r[white]           Refresh data
-  [yellow]m[white]           Import configuration
-  [yellow]w[white]           Export configuration
+[yellow::b]🌐 General Actions:[white::-]
+  [lime]q[white]           Quit application
+  [lime]?[white]           Show this help
+  [lime]r[white]           Refresh data
 
-[yellow::b]Profile Navigation (Server panel):[white::-]
-  [yellow]Tab[white]         Switch to next profile
-  [yellow]Shift+Tab[white]   Switch to previous profile
-  [yellow]p[white]           Switch to next profile
+[green::b]💡 Tip:[white::-] Press [lime]?[white] for context-sensitive help
 
-[yellow::b]Session Management:[white::-]
-  [yellow]s[white]           Switch focus to sessions panel
-  [yellow]Enter[white]       Attach to selected session (when in sessions)
-
-[yellow::b]Panel Focus:[white::-]
-  [yellow]Yellow border[white] indicates active panel
-
-[yellow::b]Mouse support:[white::-] Click to select items
-
-[yellow::b]Server Actions (when server is selected):[white::-]
-  [yellow]Enter[white]       Connect to server
-  [yellow]e[white]           Edit server configuration
-  [yellow]d[white]           Delete server (with confirmation)
-  [yellow]b[white]           Connect to all servers in current profile (batch)
-
-[green::b]Additional Notes:[white::-]
-[green]•[white] TUI exits when connecting to allow tmux to take over
-[green]•[white] Sessions are refreshed automatically when switching focus
-[green]•[white] Profile changes filter the server list in real-time`
+[gray]Press [lime]Enter[white] or [lime]Escape[white] to close[gray]`
 
 	modal := tview.NewModal().
 		SetText(helpText).
