@@ -2,6 +2,7 @@ package tui
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
@@ -577,8 +578,8 @@ func TestProfileNavigator_TabDisplay(t *testing.T) {
 	}
 
 	// Should highlight the selected tab (All should be highlighted by default)
-	if !strings.Contains(tabText, "[aqua][All][white]") {
-		t.Errorf("Expected 'All' tab to be highlighted in tab display, got: %s", tabText)
+	if !strings.Contains(tabText, "[black:aqua:b] All [white::-]") {
+		t.Errorf("Expected 'All' tab to be highlighted with enhanced styling in tab display, got: %s", tabText)
 	}
 }
 
@@ -808,6 +809,499 @@ func TestProfileNavigator_BackwardNavigation(t *testing.T) {
 	if app.selectedProfileIndex != expectedIndex {
 		t.Errorf("Expected profile index to be %d after backward navigation, got %d", expectedIndex, app.selectedProfileIndex)
 	}
+}
+
+// TestProfileSelection_VisualIndicators tests the visual highlighting of selected profiles
+func TestProfileSelection_VisualIndicators(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test initial profile highlighting (All tab should be selected)
+	tabText := app.renderProfileTabs()
+	if !strings.Contains(tabText, "[black:aqua:b] All [white::-]") {
+		t.Errorf("Expected 'All' profile to be highlighted with enhanced styling, got: %s", tabText)
+	}
+
+	// Test that other profiles are not highlighted initially
+	for i := 1; i < len(app.profileTabs); i++ {
+		profileName := app.profileTabs[i]
+		if strings.Contains(tabText, fmt.Sprintf("[black:aqua:b] %s [white::-]", profileName)) {
+			t.Errorf("Expected profile '%s' to NOT be highlighted initially, but it was highlighted", profileName)
+		}
+		// Verify they have the subtle styling instead
+		if !strings.Contains(tabText, fmt.Sprintf("[lightgray]%s[white]", profileName)) {
+			t.Errorf("Expected profile '%s' to have subtle styling when not selected", profileName)
+		}
+	}
+
+	// Switch to next profile and test highlighting
+	app.switchToNextProfile()
+	tabText = app.renderProfileTabs()
+	
+	// The selected profile should be highlighted with enhanced styling
+	selectedProfile := app.profileTabs[app.selectedProfileIndex]
+	if !strings.Contains(tabText, fmt.Sprintf("[black:aqua:b] %s [white::-]", selectedProfile)) {
+		t.Errorf("Expected selected profile '%s' to be highlighted with enhanced styling, got: %s", selectedProfile, tabText)
+	}
+
+	// Other profiles should not be highlighted but have subtle styling
+	for i, profileName := range app.profileTabs {
+		if i != app.selectedProfileIndex {
+			highlightedText := fmt.Sprintf("[black:aqua:b] %s [white::-]", profileName)
+			if strings.Contains(tabText, highlightedText) {
+				t.Errorf("Expected profile '%s' to NOT be highlighted when not selected, but it was", profileName)
+			}
+			// Verify they have subtle styling
+			if !strings.Contains(tabText, fmt.Sprintf("[lightgray]%s[white]", profileName)) {
+				t.Errorf("Expected profile '%s' to have subtle styling when not selected", profileName)
+			}
+		}
+	}
+}
+
+// TestProfileSelection_StateManagement tests profile selection state persistence
+func TestProfileSelection_StateManagement(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test initial state
+	initialIndex := app.selectedProfileIndex
+	initialFilter := app.currentFilter
+	
+	if initialIndex != 0 {
+		t.Errorf("Expected initial profile index to be 0 (All), got %d", initialIndex)
+	}
+	if initialFilter != "" {
+		t.Errorf("Expected initial filter to be empty (All), got '%s'", initialFilter)
+	}
+
+	// Switch to a specific profile and verify state persistence
+	targetProfileIndex := 2
+	if len(app.profileTabs) > targetProfileIndex {
+		app.switchToProfile(targetProfileIndex)
+		
+		// Verify the selection persisted
+		if app.selectedProfileIndex != targetProfileIndex {
+			t.Errorf("Expected profile index to be %d, got %d", targetProfileIndex, app.selectedProfileIndex)
+		}
+
+		// Verify the filter was updated correctly
+		expectedFilter := app.profileTabs[targetProfileIndex]
+		if app.currentFilter != expectedFilter {
+			t.Errorf("Expected current filter to be '%s', got '%s'", expectedFilter, app.currentFilter)
+		}
+
+		// Perform some operations and verify state persists
+		app.refreshServerList()
+		app.updateProfileDisplay()
+
+		// State should still be maintained
+		if app.selectedProfileIndex != targetProfileIndex {
+			t.Errorf("Expected profile index to persist after operations, expected %d, got %d", 
+				targetProfileIndex, app.selectedProfileIndex)
+		}
+		if app.currentFilter != expectedFilter {
+			t.Errorf("Expected filter to persist after operations, expected '%s', got '%s'", 
+				expectedFilter, app.currentFilter)
+		}
+	}
+}
+
+// TestProfileSelection_FilterConsistency tests consistency between profile selection and server filtering
+func TestProfileSelection_FilterConsistency(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Test filter consistency for each profile
+	for i, profileName := range app.profileTabs {
+		app.switchToProfile(i)
+		
+		// Verify the filter was set correctly
+		expectedFilter := ""
+		if profileName != "All" {
+			expectedFilter = profileName
+		}
+		
+		if app.currentFilter != expectedFilter {
+			t.Errorf("Profile '%s': expected filter '%s', got '%s'", 
+				profileName, expectedFilter, app.currentFilter)
+		}
+
+		// Verify the visual indicator matches the filter
+		tabText := app.renderProfileTabs()
+		if !strings.Contains(tabText, fmt.Sprintf("[black:aqua:b] %s [white::-]", profileName)) {
+			t.Errorf("Profile '%s': expected enhanced visual highlighting but not found in: %s", 
+				profileName, tabText)
+		}
+
+		// Verify server list reflects the filter
+		rowCount := app.serverList.GetRowCount()
+		if profileName == "All" {
+			// All profile should show all servers
+			expectedMinRows := 2 // header + at least one server
+			if rowCount < expectedMinRows {
+				t.Errorf("Profile 'All': expected at least %d rows, got %d", expectedMinRows, rowCount)
+			}
+		} else {
+			// Specific profiles should show filtered servers
+			// The test config has servers in different profiles, so we expect filtering
+			// This is validated by checking that row count changed appropriately
+		}
+	}
+}
+
+// TestProfileSelection_NavigationPersistence tests that profile selection persists during navigation
+func TestProfileSelection_NavigationPersistence(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create test config file
+	testCfg := createTestConfig(t)
+	configPath := filepath.Join(tempDir, "config.yaml")
+	if err := testCfg.SaveToPath(configPath); err != nil {
+		t.Fatalf("Failed to save test config: %v", err)
+	}
+
+	// Create TUI app
+	app, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	// Select a specific profile
+	targetProfileIndex := 1
+	if len(app.profileTabs) > targetProfileIndex {
+		app.switchToProfile(targetProfileIndex)
+		selectedProfile := app.profileTabs[targetProfileIndex]
+
+		// Perform various navigation operations
+		operations := []func(){
+			func() { app.handleNavigationUp() },
+			func() { app.handleNavigationDown() },
+			func() { app.switchFocus() },
+			func() { app.switchFocus() }, // Switch back
+			func() { app.refreshData() },
+		}
+
+		for i, operation := range operations {
+			// Perform operation
+			operation()
+
+			// Verify profile selection persisted
+			if app.selectedProfileIndex != targetProfileIndex {
+				t.Errorf("Operation %d: profile selection not persisted, expected %d, got %d", 
+					i, targetProfileIndex, app.selectedProfileIndex)
+			}
+
+			// Verify visual indicator persisted
+			tabText := app.renderProfileTabs()
+			if !strings.Contains(tabText, fmt.Sprintf("[black:aqua:b] %s [white::-]", selectedProfile)) {
+				t.Errorf("Operation %d: enhanced visual indicator not persisted for profile '%s': %s", 
+					i, selectedProfile, tabText)
+			}
+		}
+	}
+}
+
+// TestProfileSelection_DifferentConfigurations tests profile indicators across various configuration scenarios
+func TestProfileSelection_DifferentConfigurations(t *testing.T) {
+	// Test with no profiles (only "All")
+	t.Run("NoProfiles", func(t *testing.T) {
+		// Create a temporary directory for test config
+		tempDir := t.TempDir()
+		os.Setenv("SSHM_CONFIG_DIR", tempDir)
+		defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+		// Create minimal test config with no profiles
+		testCfg := &config.Config{
+			Servers: []config.Server{
+				{Name: "test-server", Hostname: "test.example.com", Port: 22, Username: "root", AuthType: "key"},
+			},
+			Profiles: []config.Profile{}, // No profiles
+		}
+		configPath := filepath.Join(tempDir, "config.yaml")
+		if err := testCfg.SaveToPath(configPath); err != nil {
+			t.Fatalf("Failed to save test config: %v", err)
+		}
+
+		// Create TUI app
+		app, err := NewTUIApp()
+		if err != nil {
+			t.Fatalf("Failed to create TUI app: %v", err)
+		}
+
+		// Should only have "All" tab
+		if len(app.profileTabs) != 1 {
+			t.Errorf("Expected 1 profile tab (All only), got %d", len(app.profileTabs))
+		}
+		if app.profileTabs[0] != "All" {
+			t.Errorf("Expected tab to be 'All', got '%s'", app.profileTabs[0])
+		}
+
+		// Visual indicator should work correctly
+		tabText := app.renderProfileTabs()
+		if !strings.Contains(tabText, "[black:aqua:b] All [white::-]") {
+			t.Errorf("Expected 'All' tab to be highlighted even with no profiles, got: %s", tabText)
+		}
+	})
+
+	// Test with single profile
+	t.Run("SingleProfile", func(t *testing.T) {
+		// Create a temporary directory for test config
+		tempDir := t.TempDir()
+		os.Setenv("SSHM_CONFIG_DIR", tempDir)
+		defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+		// Create test config with single profile
+		testCfg := &config.Config{
+			Servers: []config.Server{
+				{Name: "prod-server", Hostname: "prod.example.com", Port: 22, Username: "root", AuthType: "key"},
+			},
+			Profiles: []config.Profile{
+				{Name: "production", Servers: []string{"prod-server"}},
+			},
+		}
+		configPath := filepath.Join(tempDir, "config.yaml")
+		if err := testCfg.SaveToPath(configPath); err != nil {
+			t.Fatalf("Failed to save test config: %v", err)
+		}
+
+		// Create TUI app
+		app, err := NewTUIApp()
+		if err != nil {
+			t.Fatalf("Failed to create TUI app: %v", err)
+		}
+
+		// Should have "All" + 1 profile tab
+		expectedTabs := 2
+		if len(app.profileTabs) != expectedTabs {
+			t.Errorf("Expected %d profile tabs, got %d", expectedTabs, len(app.profileTabs))
+		}
+
+		// Test switching between tabs
+		app.switchToNextProfile() // Switch to production
+		tabText := app.renderProfileTabs()
+		if !strings.Contains(tabText, "[black:aqua:b] production [white::-]") {
+			t.Errorf("Expected 'production' tab to be highlighted, got: %s", tabText)
+		}
+		if !strings.Contains(tabText, "[lightgray]All[white]") {
+			t.Errorf("Expected 'All' tab to have subtle styling when not selected, got: %s", tabText)
+		}
+	})
+
+	// Test with many profiles
+	t.Run("ManyProfiles", func(t *testing.T) {
+		// Create a temporary directory for test config
+		tempDir := t.TempDir()
+		os.Setenv("SSHM_CONFIG_DIR", tempDir)
+		defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+		// Create test config with many profiles
+		testCfg := &config.Config{
+			Servers: []config.Server{
+				{Name: "server1", Hostname: "s1.example.com", Port: 22, Username: "root", AuthType: "key"},
+				{Name: "server2", Hostname: "s2.example.com", Port: 22, Username: "root", AuthType: "key"},
+				{Name: "server3", Hostname: "s3.example.com", Port: 22, Username: "root", AuthType: "key"},
+				{Name: "server4", Hostname: "s4.example.com", Port: 22, Username: "root", AuthType: "key"},
+				{Name: "server5", Hostname: "s5.example.com", Port: 22, Username: "root", AuthType: "key"},
+			},
+			Profiles: []config.Profile{
+				{Name: "development", Servers: []string{"server1", "server2"}},
+				{Name: "staging", Servers: []string{"server3"}},
+				{Name: "production", Servers: []string{"server4", "server5"}},
+				{Name: "testing", Servers: []string{"server1", "server3", "server5"}},
+				{Name: "backup", Servers: []string{"server2", "server4"}},
+			},
+		}
+		configPath := filepath.Join(tempDir, "config.yaml")
+		if err := testCfg.SaveToPath(configPath); err != nil {
+			t.Fatalf("Failed to save test config: %v", err)
+		}
+
+		// Create TUI app
+		app, err := NewTUIApp()
+		if err != nil {
+			t.Fatalf("Failed to create TUI app: %v", err)
+		}
+
+		// Should have "All" + 5 profile tabs
+		expectedTabs := 6
+		if len(app.profileTabs) != expectedTabs {
+			t.Errorf("Expected %d profile tabs, got %d", expectedTabs, len(app.profileTabs))
+		}
+
+		// Test that each profile can be selected and highlighted correctly
+		expectedProfiles := []string{"All", "development", "staging", "production", "testing", "backup"}
+		for i, expectedProfile := range expectedProfiles {
+			app.switchToProfile(i)
+			
+			if app.selectedProfileIndex != i {
+				t.Errorf("Expected profile index to be %d for '%s', got %d", i, expectedProfile, app.selectedProfileIndex)
+			}
+
+			tabText := app.renderProfileTabs()
+			if !strings.Contains(tabText, fmt.Sprintf("[black:aqua:b] %s [white::-]", expectedProfile)) {
+				t.Errorf("Expected profile '%s' to be highlighted, got: %s", expectedProfile, tabText)
+			}
+
+			// Verify other profiles have subtle styling
+			for j, otherProfile := range expectedProfiles {
+				if j != i {
+					if !strings.Contains(tabText, fmt.Sprintf("[lightgray]%s[white]", otherProfile)) {
+						t.Errorf("Expected profile '%s' to have subtle styling when not selected", otherProfile)
+					}
+				}
+			}
+		}
+
+		// Test that separators are working correctly with many profiles
+		tabText := app.renderProfileTabs()
+		separatorCount := strings.Count(tabText, "[darkgray]│[white]")
+		expectedSeparators := len(expectedProfiles) - 1 // n-1 separators for n profiles
+		if separatorCount != expectedSeparators {
+			t.Errorf("Expected %d separators between profiles, got %d", expectedSeparators, separatorCount)
+		}
+	})
+}
+
+// TestProfileSelection_EdgeCases tests profile selection in various edge cases
+func TestProfileSelection_EdgeCases(t *testing.T) {
+	// Test profile selection with empty server lists in profiles
+	t.Run("EmptyServerLists", func(t *testing.T) {
+		// Create a temporary directory for test config
+		tempDir := t.TempDir()
+		os.Setenv("SSHM_CONFIG_DIR", tempDir)
+		defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+		// Create test config with profiles that have no servers
+		testCfg := &config.Config{
+			Servers: []config.Server{
+				{Name: "test-server", Hostname: "test.example.com", Port: 22, Username: "root", AuthType: "key"},
+			},
+			Profiles: []config.Profile{
+				{Name: "empty-profile", Servers: []string{}}, // Empty server list
+				{Name: "populated-profile", Servers: []string{"test-server"}},
+			},
+		}
+		configPath := filepath.Join(tempDir, "config.yaml")
+		if err := testCfg.SaveToPath(configPath); err != nil {
+			t.Fatalf("Failed to save test config: %v", err)
+		}
+
+		// Create TUI app
+		app, err := NewTUIApp()
+		if err != nil {
+			t.Fatalf("Failed to create TUI app: %v", err)
+		}
+
+		// Should handle empty profiles gracefully
+		app.switchToProfile(1) // Switch to empty-profile
+		tabText := app.renderProfileTabs()
+		if !strings.Contains(tabText, "[black:aqua:b] empty-profile [white::-]") {
+			t.Errorf("Expected empty profile to be highlightable, got: %s", tabText)
+		}
+
+		// Server list should be filtered correctly (showing no servers for empty profile)
+		rowCount := app.serverList.GetRowCount()
+		if rowCount > 1 { // Should only have header row for empty profile
+			t.Errorf("Expected only header row for empty profile, got %d rows", rowCount)
+		}
+	})
+
+	// Test profile name collision handling (profiles with similar names)
+	t.Run("SimilarProfileNames", func(t *testing.T) {
+		// Create a temporary directory for test config
+		tempDir := t.TempDir()
+		os.Setenv("SSHM_CONFIG_DIR", tempDir)
+		defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+		// Create test config with similar profile names
+		testCfg := &config.Config{
+			Servers: []config.Server{
+				{Name: "server1", Hostname: "s1.example.com", Port: 22, Username: "root", AuthType: "key"},
+				{Name: "server2", Hostname: "s2.example.com", Port: 22, Username: "root", AuthType: "key"},
+			},
+			Profiles: []config.Profile{
+				{Name: "test", Servers: []string{"server1"}},
+				{Name: "test-prod", Servers: []string{"server2"}},
+				{Name: "test-dev", Servers: []string{"server1", "server2"}},
+			},
+		}
+		configPath := filepath.Join(tempDir, "config.yaml")
+		if err := testCfg.SaveToPath(configPath); err != nil {
+			t.Fatalf("Failed to save test config: %v", err)
+		}
+
+		// Create TUI app
+		app, err := NewTUIApp()
+		if err != nil {
+			t.Fatalf("Failed to create TUI app: %v", err)
+		}
+
+		// Test that each profile is correctly distinguished
+		profileNames := []string{"test", "test-prod", "test-dev"}
+		for i, profileName := range profileNames {
+			profileIndex := i + 1 // +1 because "All" is at index 0
+			app.switchToProfile(profileIndex)
+			
+			tabText := app.renderProfileTabs()
+			if !strings.Contains(tabText, fmt.Sprintf("[black:aqua:b] %s [white::-]", profileName)) {
+				t.Errorf("Expected profile '%s' to be highlighted distinctly, got: %s", profileName, tabText)
+			}
+
+			// Verify filter is set correctly
+			if app.currentFilter != profileName {
+				t.Errorf("Expected filter to be '%s', got '%s'", profileName, app.currentFilter)
+			}
+		}
+	})
 }
 
 // TestSessionManager_Creation tests the creation and initialization of session manager

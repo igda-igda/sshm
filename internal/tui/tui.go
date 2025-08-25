@@ -180,6 +180,12 @@ func (t *TUIApp) setupSessionPanel() {
 func (t *TUIApp) initializeProfileTabs() {
 	profiles := t.config.GetProfiles()
 	
+	// Store current selection for preservation
+	previouslySelectedProfile := ""
+	if t.selectedProfileIndex >= 0 && t.selectedProfileIndex < len(t.profileTabs) {
+		previouslySelectedProfile = t.profileTabs[t.selectedProfileIndex]
+	}
+	
 	// Always start with "All" tab
 	t.profileTabs = []string{"All"}
 	
@@ -188,18 +194,37 @@ func (t *TUIApp) initializeProfileTabs() {
 		t.profileTabs = append(t.profileTabs, profile.Name)
 	}
 	
-	// Initialize selected index to 0 (All tab)
-	t.selectedProfileIndex = 0
-	t.currentFilter = "" // Empty filter means show all servers
+	// Try to preserve previous selection, or default to 0 (All tab)
+	newSelectedIndex := 0
+	if previouslySelectedProfile != "" {
+		for i, tab := range t.profileTabs {
+			if tab == previouslySelectedProfile {
+				newSelectedIndex = i
+				break
+			}
+		}
+	}
+	
+	t.selectedProfileIndex = newSelectedIndex
+	t.updateFilterFromProfile()
 }
 
 // updateProfileDisplay updates the profile navigator display
 func (t *TUIApp) updateProfileDisplay() {
 	tabText := t.renderProfileTabs()
 	t.profileNavigator.SetText(tabText)
+	
+	// Update the title to show the currently selected profile
+	if t.selectedProfileIndex >= 0 && t.selectedProfileIndex < len(t.profileTabs) {
+		selectedProfile := t.profileTabs[t.selectedProfileIndex]
+		title := fmt.Sprintf(" Profiles › [aqua]%s[white] ", selectedProfile)
+		t.profileNavigator.SetTitle(title)
+	} else {
+		t.profileNavigator.SetTitle(" Profiles ")
+	}
 }
 
-// renderProfileTabs generates the tab display text with highlighting
+// renderProfileTabs generates the tab display text with enhanced highlighting
 func (t *TUIApp) renderProfileTabs() string {
 	if len(t.profileTabs) == 0 {
 		return "[white]No profiles configured"
@@ -208,16 +233,16 @@ func (t *TUIApp) renderProfileTabs() string {
 	var tabStrings []string
 	for i, tab := range t.profileTabs {
 		if i == t.selectedProfileIndex {
-			// Highlight selected tab
-			tabStrings = append(tabStrings, fmt.Sprintf("[aqua][%s][white]", tab))
+			// Enhanced highlighting for selected tab with background and bold styling
+			tabStrings = append(tabStrings, fmt.Sprintf("[black:aqua:b] %s [white::-]", tab))
 		} else {
-			// Normal tab
-			tabStrings = append(tabStrings, tab)
+			// Subtle styling for non-selected tabs
+			tabStrings = append(tabStrings, fmt.Sprintf("[lightgray]%s[white]", tab))
 		}
 	}
 	
-	// Join tabs with separators
-	return strings.Join(tabStrings, " | ")
+	// Join tabs with enhanced separators
+	return strings.Join(tabStrings, " [darkgray]│[white] ")
 }
 
 // setupKeyBindings configures global key bindings
