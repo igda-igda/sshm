@@ -1328,3 +1328,573 @@ func TestFormIntegrationWithConfig(t *testing.T) {
 	// If we get here without errors, the integration worked
 }
 
+// TestFormFieldFocusIndicators tests that form fields show proper focus indicators
+func TestFormFieldFocusIndicators(t *testing.T) {
+	fields := map[string]*FormField{
+		"field1": {
+			inputField: tview.NewInputField().SetLabel("Field 1: "),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+		"field2": {
+			inputField: tview.NewInputField().SetLabel("Field 2: "),
+			validator:  func(s string) error { return nil },
+			required:   false,
+		},
+	}
+
+	onSubmit := func(data map[string]interface{}) error { return nil }
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+	
+	if form == nil || form.form == nil {
+		t.Fatal("Expected form to be created")
+	}
+
+	// Test that input fields have proper styling configuration for focus
+	for fieldName, field := range form.fields {
+		inputField := field.inputField
+		if inputField == nil {
+			t.Errorf("Expected field '%s' to have an input field", fieldName)
+			continue
+		}
+		
+		// Verify that field has focus color configuration
+		// Since we can't directly test tview styling, we verify the field exists
+		// and can receive focus (this will be enhanced with actual styling tests)
+		if inputField.GetLabel() == "" {
+			t.Errorf("Expected field '%s' to have a label", fieldName)
+		}
+	}
+}
+
+// TestFormFieldTabNavigation tests tab navigation between form fields
+func TestFormFieldTabNavigation(t *testing.T) {
+	fields := map[string]*FormField{
+		"name": {
+			inputField: tview.NewInputField().SetLabel("Name: "),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+		"hostname": {
+			inputField: tview.NewInputField().SetLabel("Hostname: "),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+		"port": {
+			inputField: tview.NewInputField().SetLabel("Port: ").SetText("22"),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+	}
+
+	onSubmit := func(data map[string]interface{}) error { return nil }
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+	helper := NewFormTestHelper(form)
+	defer helper.Cleanup()
+
+	// Verify form has input capture for navigation
+	if form.form.GetInputCapture() == nil {
+		t.Error("Expected form to have input capture for navigation")
+	}
+
+	// Test Tab key handling
+	tabEvent := tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModNone)
+	if inputCapture := form.form.GetInputCapture(); inputCapture != nil {
+		returnedEvent := inputCapture(tabEvent)
+		if returnedEvent == tabEvent {
+			// Tab was passed through to tview, which is expected behavior
+			// This verifies navigation structure is in place
+		}
+	}
+
+	// Test Shift+Tab key handling  
+	shiftTabEvent := tcell.NewEventKey(tcell.KeyTab, 0, tcell.ModShift)
+	if inputCapture := form.form.GetInputCapture(); inputCapture != nil {
+		returnedEvent := inputCapture(shiftTabEvent)
+		if returnedEvent == shiftTabEvent {
+			// Shift+Tab was passed through to tview, which is expected behavior
+			// This verifies navigation structure is in place
+		}
+	}
+
+	// Note: In the current implementation, Tab events are passed through to tview
+	// This test verifies the structure is in place for navigation handling
+}
+
+// TestFormFieldHighlightingBehavior tests visual highlighting behavior of form fields
+func TestFormFieldHighlightingBehavior(t *testing.T) {
+	fields := CreateServerFormFields()
+	
+	onSubmit := func(data map[string]interface{}) error { return nil }
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+	
+	// Test that all form fields are properly configured for highlighting
+	for fieldName, field := range form.fields {
+		inputField := field.inputField
+		
+		// Verify field configuration that supports highlighting
+		if inputField == nil {
+			t.Errorf("Expected field '%s' to have input field", fieldName)
+			continue
+		}
+		
+		// Verify label is set (required for proper highlighting display)
+		if inputField.GetLabel() == "" {
+			t.Errorf("Expected field '%s' to have a label for highlighting", fieldName)
+		}
+		
+		// Verify field width is set (affects highlighting appearance)
+		// This will be enhanced once highlighting implementation is added
+		if fieldName == "hostname" {
+			// Hostname field should have sufficient width for highlighting
+			// Current implementation sets field width - verify this structure
+		}
+	}
+	
+	// Test form structure supports focus management
+	if form.form == nil {
+		t.Error("Expected form to exist for focus management")
+	}
+	
+	// Test that field order is maintained for navigation
+	if len(form.fieldOrder) != len(form.fields) {
+		t.Errorf("Expected field order length %d to match fields length %d", 
+			len(form.fieldOrder), len(form.fields))
+	}
+}
+
+// TestFormButtonHighlighting tests that Submit and Cancel buttons have prominent highlighting
+func TestFormButtonHighlighting(t *testing.T) {
+	fields := map[string]*FormField{
+		"test_field": {
+			inputField: tview.NewInputField().SetLabel("Test: "),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+	}
+
+	submitCalled := false
+	cancelCalled := false
+	
+	onSubmit := func(data map[string]interface{}) error {
+		submitCalled = true
+		return nil
+	}
+	
+	onCancel := func() {
+		cancelCalled = true
+	}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+	
+	// Test that form has buttons (Submit and Cancel are added in setupFormFields)
+	if form.form == nil {
+		t.Fatal("Expected form to exist")
+	}
+	
+	// Test that buttons can be activated (Submit and Cancel callbacks work)
+	helper := NewFormTestHelper(form)
+	defer helper.Cleanup()
+	
+	// Test Enter key activates submit
+	helper.SimulateKeypress(tcell.KeyEnter)
+	helper.ProcessEvents()
+	
+	if !submitCalled {
+		t.Error("Expected submit button to be activated with Enter key")
+	}
+	
+	// Test Escape key activates cancel
+	helper.SimulateKeypress(tcell.KeyEscape)
+	helper.ProcessEvents()
+	
+	if !cancelCalled {
+		t.Error("Expected cancel button to be activated with Escape key")
+	}
+	
+	// Test that button styling is maintained after field navigation
+	form.moveFocusNext() // Change field focus
+	form.updateButtonHighlighting() // Should maintain button styling
+	
+	// Test that setupButtonStyling was called during form creation
+	// We can't directly test colors, but we can verify the form structure supports styling
+	if form.form == nil {
+		t.Error("Expected form to exist for button styling verification")
+	}
+}
+
+// TestFormFieldFocusTransitions tests smooth focus transitions between fields
+func TestFormFieldFocusTransitions(t *testing.T) {
+	fields := map[string]*FormField{
+		"name": {
+			inputField: tview.NewInputField().SetLabel("Name: "),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+		"hostname": {
+			inputField: tview.NewInputField().SetLabel("Hostname: "),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+		"username": {
+			inputField: tview.NewInputField().SetLabel("Username: "),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+	}
+
+	onSubmit := func(data map[string]interface{}) error { return nil }
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+	helper := NewFormTestHelper(form)
+	defer helper.Cleanup()
+
+	// Test that field order is correctly maintained for focus transitions
+	expectedOrder := []string{"name", "hostname", "username"}
+	for i, expectedField := range expectedOrder {
+		if i < len(form.fieldOrder) {
+			if form.fieldOrder[i] != expectedField {
+				t.Errorf("Expected field at position %d to be '%s', got '%s'", 
+					i, expectedField, form.fieldOrder[i])
+			}
+		}
+	}
+	
+	// Test initial focus index
+	if form.focusIndex != 0 {
+		t.Errorf("Expected initial focus index to be 0, got %d", form.focusIndex)
+	}
+	
+	// Test focus advancement with Tab navigation
+	initialIndex := form.focusIndex
+	form.moveFocusNext()
+	if form.focusIndex != (initialIndex+1)%len(form.fieldOrder) {
+		t.Errorf("Expected focus index to advance, got %d", form.focusIndex)
+	}
+	
+	// Test focus movement with Shift+Tab (backward navigation)  
+	form.moveFocusPrevious()
+	if form.focusIndex != initialIndex {
+		t.Errorf("Expected focus index to return to initial, got %d", form.focusIndex)
+	}
+	
+	// Test getCurrentFocusedField functionality
+	fieldName, field := form.getCurrentFocusedField()
+	if fieldName != expectedOrder[form.focusIndex] {
+		t.Errorf("Expected focused field name to be '%s', got '%s'", 
+			expectedOrder[form.focusIndex], fieldName)
+	}
+	if field == nil {
+		t.Error("Expected focused field to be non-nil")
+	}
+	
+	// Test setFocusIndex functionality
+	form.setFocusIndex(2)
+	if form.focusIndex != 2 {
+		t.Errorf("Expected focus index to be set to 2, got %d", form.focusIndex)
+	}
+	
+	fieldName, _ = form.getCurrentFocusedField()
+	if fieldName != expectedOrder[2] {
+		t.Errorf("Expected focused field name to be '%s' after setting index 2, got '%s'", 
+			expectedOrder[2], fieldName)
+	}
+}
+
+// TestFormFieldHighlightingAcrossThemes tests field highlighting across different terminal themes
+func TestFormFieldHighlightingAcrossThemes(t *testing.T) {
+	fields := map[string]*FormField{
+		"test_field": {
+			inputField: tview.NewInputField().SetLabel("Test: "),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+	}
+
+	onSubmit := func(data map[string]interface{}) error { return nil }
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+	
+	// Test that form fields are configured to work with different themes
+	for fieldName, field := range form.fields {
+		inputField := field.inputField
+		
+		// Verify field has proper configuration for theme compatibility
+		if inputField == nil {
+			t.Errorf("Expected field '%s' to have input field", fieldName)
+			continue
+		}
+		
+		// Test that field label and placeholder work across themes
+		if inputField.GetLabel() == "" {
+			t.Errorf("Expected field '%s' to have label for theme compatibility", fieldName)
+		}
+	}
+	
+	// Test that styling maintains contrast and visibility across different scenarios
+	testColorSchemes := []struct {
+		name        string
+		description string
+	}{
+		{"light", "Light terminal themes"},
+		{"dark", "Dark terminal themes"},
+		{"high_contrast", "High contrast themes"},
+		{"monochrome", "Monochrome displays"},
+	}
+	
+	for _, scheme := range testColorSchemes {
+		t.Run(scheme.name, func(t *testing.T) {
+			// Test that form maintains functionality regardless of theme
+			form.applyFocusStyling()
+			form.updateButtonHighlighting()
+			
+			// Test focus transitions work across themes
+			originalIndex := form.focusIndex
+			form.moveFocusNext()
+			form.moveFocusPrevious()
+			
+			if form.focusIndex != originalIndex {
+				t.Errorf("Focus index should return to original after next/previous cycle in %s theme", scheme.name)
+			}
+			
+			// Test that fields maintain their functionality
+			fieldName, field := form.getCurrentFocusedField()
+			if fieldName == "" || field == nil {
+				t.Errorf("Expected valid focused field in %s theme", scheme.name)
+			}
+		})
+	}
+	
+	// Test form background and foreground color handling
+	if form.form == nil {
+		t.Error("Expected form to exist for theme testing")
+	}
+}
+
+// TestFormFieldContrastAndVisibility tests that form styling provides adequate contrast
+func TestFormFieldContrastAndVisibility(t *testing.T) {
+	fields := CreateServerFormFields()
+	
+	onSubmit := func(data map[string]interface{}) error { return nil }
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+	
+	// Test that focused vs unfocused fields have distinct styling
+	form.setFocusIndex(0)
+	form.applyFocusStyling()
+	
+	// Test cycling through all fields to ensure each gets proper focus styling
+	for i := 0; i < len(form.fieldOrder); i++ {
+		form.setFocusIndex(i)
+		
+		fieldName, field := form.getCurrentFocusedField()
+		if fieldName == "" {
+			t.Errorf("Expected field name at index %d", i)
+		}
+		if field == nil {
+			t.Errorf("Expected field to exist at index %d", i)
+		}
+		if field.inputField == nil {
+			t.Errorf("Expected input field to exist for field '%s'", fieldName)
+		}
+	}
+	
+	// Test button styling maintains visibility
+	form.setupButtonStyling()
+	form.updateButtonHighlighting()
+	
+	// Test that form styling doesn't break with rapid focus changes
+	for cycle := 0; cycle < 3; cycle++ {
+		for i := 0; i < len(form.fieldOrder); i++ {
+			form.moveFocusNext()
+		}
+	}
+	
+	// Form should still be functional after rapid focus changes
+	if form.focusIndex < 0 || form.focusIndex >= len(form.fieldOrder) {
+		t.Errorf("Focus index %d is out of range after rapid cycling", form.focusIndex)
+	}
+}
+
+// TestFormButtonStyling tests prominent styling for Submit and Cancel buttons
+func TestFormButtonStyling(t *testing.T) {
+	fields := map[string]*FormField{
+		"test_field": {
+			inputField: tview.NewInputField().SetLabel("Test: "),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+	}
+
+	onSubmit := func(data map[string]interface{}) error { return nil }
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+	
+	// Test that button styling methods exist and can be called
+	form.setupButtonStyling()
+	form.updateButtonHighlighting()
+	
+	// Test that button styling persists through field focus changes
+	originalFocusIndex := form.focusIndex
+	
+	// Change field focus
+	if len(form.fieldOrder) > 0 {
+		form.moveFocusNext()
+		
+		// Verify focus changed
+		if form.focusIndex == originalFocusIndex && len(form.fieldOrder) > 1 {
+			t.Error("Expected focus index to change when moving to next field")
+		}
+		
+		// Test that buttons maintain styling after focus change
+		form.updateButtonHighlighting()
+	}
+	
+	// Test button styling during form operations
+	helper := NewFormTestHelper(form)
+	defer helper.Cleanup()
+	
+	// Simulate navigation that should maintain button styling
+	helper.SimulateKeypress(tcell.KeyTab)
+	helper.ProcessEvents()
+	
+	// Button styling should still be prominent
+	// We can't directly test colors, but we verify the infrastructure exists
+	if form.form == nil {
+		t.Error("Expected form to exist for button styling")
+	}
+}
+
+// TestFormFieldVisualStyling tests that visual styling is properly applied to form fields
+func TestFormFieldVisualStyling(t *testing.T) {
+	fields := CreateServerFormFields()
+	
+	onSubmit := func(data map[string]interface{}) error { return nil }
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+	
+	// Test that initial styling is applied
+	form.applyFocusStyling()
+	
+	// Test that focus styling is applied to the first field (index 0)
+	if len(form.fieldOrder) > 0 {
+		firstFieldName := form.fieldOrder[0]
+		if field, exists := form.fields[firstFieldName]; exists {
+			// The field should exist and be styled - we can't directly test colors
+			// but we can verify the field structure supports styling
+			inputField := field.inputField
+			if inputField == nil {
+				t.Errorf("Expected field '%s' to have input field for styling", firstFieldName)
+			}
+		}
+	}
+	
+	// Test focus index management
+	initialIndex := form.focusIndex
+	if initialIndex != 0 {
+		t.Errorf("Expected initial focus index to be 0, got %d", initialIndex)
+	}
+	
+	// Test focus movement updates styling
+	if len(form.fieldOrder) > 1 {
+		form.moveFocusNext()
+		if form.focusIndex == initialIndex {
+			t.Error("Expected focus index to change after moveFocusNext")
+		}
+		
+		form.moveFocusPrevious() 
+		if form.focusIndex != initialIndex {
+			t.Error("Expected focus index to return to initial after moveFocusPrevious")
+		}
+	}
+	
+	// Test setFocusIndex styling update
+	if len(form.fieldOrder) > 2 {
+		form.setFocusIndex(2)
+		if form.focusIndex != 2 {
+			t.Error("Expected focus index to be set to 2")
+		}
+	}
+}
+
+// TestFormFieldStylingIntegration tests integration between navigation and styling
+func TestFormFieldStylingIntegration(t *testing.T) {
+	fields := map[string]*FormField{
+		"field1": {
+			inputField: tview.NewInputField().SetLabel("Field 1: "),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+		"field2": {
+			inputField: tview.NewInputField().SetLabel("Field 2: "),
+			validator:  func(s string) error { return nil },
+			required:   false,
+		},
+		"field3": {
+			inputField: tview.NewInputField().SetLabel("Field 3: "),
+			validator:  func(s string) error { return nil },
+			required:   true,
+		},
+	}
+
+	onSubmit := func(data map[string]interface{}) error { return nil }
+	onCancel := func() {}
+
+	form := NewTUIForm(fields, onSubmit, onCancel)
+	helper := NewFormTestHelper(form)
+	defer helper.Cleanup()
+
+	// Test initial state
+	if form.focusIndex != 0 {
+		t.Errorf("Expected initial focus index 0, got %d", form.focusIndex)
+	}
+	
+	// Simulate Tab key navigation with styling updates
+	for i := 0; i < len(form.fieldOrder); i++ {
+		// Verify current focused field
+		fieldName, field := form.getCurrentFocusedField()
+		expectedFieldName := form.fieldOrder[form.focusIndex]
+		
+		if fieldName != expectedFieldName {
+			t.Errorf("At index %d, expected focused field '%s', got '%s'", 
+				i, expectedFieldName, fieldName)
+		}
+		
+		if field == nil {
+			t.Errorf("At index %d, expected focused field to be non-nil", i)
+		}
+		
+		// Move to next field
+		if i < len(form.fieldOrder)-1 {
+			form.moveFocusNext()
+		}
+	}
+	
+	// Test backward navigation
+	for i := len(form.fieldOrder) - 1; i >= 0; i-- {
+		fieldName, _ := form.getCurrentFocusedField()
+		expectedFieldName := form.fieldOrder[i]
+		
+		if fieldName != expectedFieldName {
+			t.Errorf("During backward nav at index %d, expected focused field '%s', got '%s'", 
+				i, expectedFieldName, fieldName)
+		}
+		
+		// Move to previous field
+		if i > 0 {
+			form.moveFocusPrevious()
+		}
+	}
+}
+

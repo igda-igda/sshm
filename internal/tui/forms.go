@@ -34,6 +34,7 @@ type TUIForm struct {
 	realTimeValidate bool                                 // Enable real-time validation
 	errorDisplay     *tview.TextView                      // Error display area
 	validationErrors map[string]string                    // Current field errors
+	focusIndex       int                                  // Current focused field index
 }
 
 // NewTUIForm creates a new TUI form with the specified fields and callbacks
@@ -60,6 +61,7 @@ func NewTUIFormWithOptions(fields map[string]*FormField, onSubmit func(map[strin
 		realTimeValidate: realTimeValidate,
 		errorDisplay:     errorDisplay,
 		validationErrors: make(map[string]string),
+		focusIndex:       0,
 	}
 	
 	// Add fields to the form
@@ -72,6 +74,9 @@ func NewTUIFormWithOptions(fields map[string]*FormField, onSubmit func(map[strin
 	if realTimeValidate {
 		tuiForm.setupRealTimeValidation()
 	}
+	
+	// Apply initial focus styling
+	tuiForm.applyFocusStyling()
 	
 	return tuiForm
 }
@@ -106,7 +111,7 @@ func (tf *TUIForm) setupFormFields() {
 		tf.form.AddTextView("Errors:", "", 0, 3, true, false)
 	}
 	
-	// Add Submit and Cancel buttons
+	// Add Submit and Cancel buttons with prominent styling
 	tf.form.AddButton("Submit", func() {
 		tf.handleSubmit()
 	})
@@ -114,6 +119,9 @@ func (tf *TUIForm) setupFormFields() {
 	tf.form.AddButton("Cancel", func() {
 		tf.handleCancel()
 	})
+	
+	// Apply button styling after buttons are added
+	tf.setupButtonStyling()
 }
 
 // setupKeyboardNavigation configures keyboard navigation for the form
@@ -129,10 +137,12 @@ func (tf *TUIForm) setupKeyboardNavigation() {
 			tf.handleCancel()
 			return nil
 		case tcell.KeyTab:
-			// Tab moves to next field
+			// Tab moves to next field with visual focus update
+			tf.moveFocusNext()
 			return event // Let tview handle Tab navigation
 		case tcell.KeyBacktab:
-			// Shift+Tab moves to previous field
+			// Shift+Tab moves to previous field with visual focus update
+			tf.moveFocusPrevious()
 			return event // Let tview handle Shift+Tab navigation
 		}
 		return event
@@ -329,7 +339,10 @@ func CreateServerFormFields() map[string]*FormField {
 			inputField: tview.NewInputField().
 				SetLabel("Server Name: ").
 				SetFieldWidth(30).
-				SetPlaceholder("e.g., production-api"),
+				SetPlaceholder("e.g., production-api").
+				SetFieldTextColor(tcell.ColorWhite).
+				SetFieldBackgroundColor(tcell.ColorBlack).
+				SetLabelColor(tcell.ColorWhite),
 			validator: ValidateServerName,
 			required:  true,
 		},
@@ -337,7 +350,10 @@ func CreateServerFormFields() map[string]*FormField {
 			inputField: tview.NewInputField().
 				SetLabel("Hostname: ").
 				SetFieldWidth(40).
-				SetPlaceholder("e.g., example.com or 192.168.1.100"),
+				SetPlaceholder("e.g., example.com or 192.168.1.100").
+				SetFieldTextColor(tcell.ColorWhite).
+				SetFieldBackgroundColor(tcell.ColorBlack).
+				SetLabelColor(tcell.ColorWhite),
 			validator: ValidateHostname,
 			required:  true,
 		},
@@ -346,7 +362,10 @@ func CreateServerFormFields() map[string]*FormField {
 				SetLabel("Port: ").
 				SetText("22").
 				SetFieldWidth(10).
-				SetPlaceholder("1-65535"),
+				SetPlaceholder("1-65535").
+				SetFieldTextColor(tcell.ColorWhite).
+				SetFieldBackgroundColor(tcell.ColorBlack).
+				SetLabelColor(tcell.ColorWhite),
 			validator: ValidatePort,
 			required:  true,
 		},
@@ -354,7 +373,10 @@ func CreateServerFormFields() map[string]*FormField {
 			inputField: tview.NewInputField().
 				SetLabel("Username: ").
 				SetFieldWidth(25).
-				SetPlaceholder("e.g., ubuntu, admin, root"),
+				SetPlaceholder("e.g., ubuntu, admin, root").
+				SetFieldTextColor(tcell.ColorWhite).
+				SetFieldBackgroundColor(tcell.ColorBlack).
+				SetLabelColor(tcell.ColorWhite),
 			validator: ValidateUsername,
 			required:  true,
 		},
@@ -363,7 +385,10 @@ func CreateServerFormFields() map[string]*FormField {
 				SetLabel("Auth Type: ").
 				SetText("key").
 				SetFieldWidth(15).
-				SetPlaceholder("key or password"),
+				SetPlaceholder("key or password").
+				SetFieldTextColor(tcell.ColorWhite).
+				SetFieldBackgroundColor(tcell.ColorBlack).
+				SetLabelColor(tcell.ColorWhite),
 			validator: ValidateAuthType,
 			required:  true,
 		},
@@ -371,7 +396,10 @@ func CreateServerFormFields() map[string]*FormField {
 			inputField: tview.NewInputField().
 				SetLabel("Key Path (optional): ").
 				SetFieldWidth(50).
-				SetPlaceholder("e.g., ~/.ssh/id_rsa"),
+				SetPlaceholder("e.g., ~/.ssh/id_rsa").
+				SetFieldTextColor(tcell.ColorWhite).
+				SetFieldBackgroundColor(tcell.ColorBlack).
+				SetLabelColor(tcell.ColorWhite),
 			validator: ValidateKeyPath,
 			required:  false,
 		},
@@ -380,7 +408,10 @@ func CreateServerFormFields() map[string]*FormField {
 				SetLabel("Passphrase Protected: ").
 				SetText("false").
 				SetFieldWidth(10).
-				SetPlaceholder("true or false"),
+				SetPlaceholder("true or false").
+				SetFieldTextColor(tcell.ColorWhite).
+				SetFieldBackgroundColor(tcell.ColorBlack).
+				SetLabelColor(tcell.ColorWhite),
 			validator: ValidatePassphraseProtected,
 			required:  false,
 		},
@@ -580,4 +611,80 @@ func (mm *ModalManager) ShowInfoModal(title, message string) {
 	}
 	
 	mm.ShowModal(modal)
+}
+
+// applyFocusStyling applies visual styling to indicate the currently focused field
+func (tf *TUIForm) applyFocusStyling() {
+	// Apply styling to all fields based on their focus state
+	for i, fieldName := range tf.fieldOrder {
+		field, exists := tf.fields[fieldName]
+		if !exists {
+			continue
+		}
+		
+		inputField := field.inputField
+		if i == tf.focusIndex {
+			// Apply focused field styling
+			inputField.SetFieldTextColor(tcell.ColorBlack).
+				SetFieldBackgroundColor(tcell.ColorWhite).
+				SetLabelColor(tcell.ColorYellow)
+		} else {
+			// Apply unfocused field styling  
+			inputField.SetFieldTextColor(tcell.ColorWhite).
+				SetFieldBackgroundColor(tcell.ColorBlack).
+				SetLabelColor(tcell.ColorWhite)
+		}
+	}
+	
+	// Ensure buttons maintain prominent highlighting
+	tf.updateButtonHighlighting()
+}
+
+// moveFocusNext moves focus to the next field and updates styling
+func (tf *TUIForm) moveFocusNext() {
+	tf.focusIndex = (tf.focusIndex + 1) % len(tf.fieldOrder)
+	tf.applyFocusStyling()
+}
+
+// moveFocusPrevious moves focus to the previous field and updates styling
+func (tf *TUIForm) moveFocusPrevious() {
+	tf.focusIndex = (tf.focusIndex - 1 + len(tf.fieldOrder)) % len(tf.fieldOrder)
+	tf.applyFocusStyling()
+}
+
+// getCurrentFocusedField returns the currently focused field name and field
+func (tf *TUIForm) getCurrentFocusedField() (string, *FormField) {
+	if tf.focusIndex >= 0 && tf.focusIndex < len(tf.fieldOrder) {
+		fieldName := tf.fieldOrder[tf.focusIndex]
+		if field, exists := tf.fields[fieldName]; exists {
+			return fieldName, field
+		}
+	}
+	return "", nil
+}
+
+// setFocusIndex sets the focus to a specific field index and updates styling
+func (tf *TUIForm) setFocusIndex(index int) {
+	if index >= 0 && index < len(tf.fieldOrder) {
+		tf.focusIndex = index
+		tf.applyFocusStyling()
+	}
+}
+
+// setupButtonStyling applies prominent styling to Submit and Cancel buttons
+func (tf *TUIForm) setupButtonStyling() {
+	// Apply form-level styling that affects buttons
+	tf.form.SetButtonBackgroundColor(tcell.ColorDarkBlue).
+		SetButtonTextColor(tcell.ColorWhite).
+		SetLabelColor(tcell.ColorWhite).
+		SetFieldBackgroundColor(tcell.ColorBlack).
+		SetFieldTextColor(tcell.ColorWhite)
+}
+
+// updateButtonHighlighting updates button styling based on current form state
+func (tf *TUIForm) updateButtonHighlighting() {
+	// This ensures buttons maintain their prominent styling
+	// even when field focus changes
+	tf.form.SetButtonBackgroundColor(tcell.ColorDarkBlue).
+		SetButtonTextColor(tcell.ColorWhite)
 }
