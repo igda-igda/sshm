@@ -22,7 +22,7 @@ func NewHelpSystem(app *TUIApp) *HelpSystem {
 // ShowHelp displays context-sensitive help based on the current focused panel
 func (h *HelpSystem) ShowHelp() {
 	var helpContent string
-	
+
 	switch h.app.focusedPanel {
 	case "servers":
 		helpContent = h.getServersHelpContent()
@@ -31,155 +31,138 @@ func (h *HelpSystem) ShowHelp() {
 	default:
 		helpContent = h.getGeneralHelpContent()
 	}
-	
+
 	h.displayHelpModal(helpContent)
 }
 
 // getServersHelpContent returns help content specific to the servers panel
 func (h *HelpSystem) getServersHelpContent() string {
-	return fmt.Sprintf(`[aqua::b]SSHM TUI Help - Servers Panel[::-]
+	return fmt.Sprintf(`[yellow::b]🖥️  SSHM Help - Servers Panel  🖥️[::-]
 
-[yellow::b]🖥️  Server Management:[white::-]
-  [lime]a[white]           Add new server with form
-  [lime]e[white]           Edit selected server configuration  
-  [lime]d[white]           Delete selected server (with confirmation)
-  [lime]Enter[white]       Connect to selected server via SSH/tmux
+[white::b]🚀 Server Management:[white::-]
+[yellow]a[white]: Add new server with connection details
+[yellow]e[white]: Edit selected server configuration
+[yellow]d[white]: Delete selected server (with confirmation)
+[yellow]Enter[white]: Connect to server via SSH/tmux
 
-[yellow::b]📁 Profile Navigation:[white::-]
-  [lime]Tab[white]         Switch to next profile tab
-  [lime]Shift+Tab[white]   Switch to previous profile tab
-  [lime]p[white]           Cycle through profile tabs
-  [lime]b[white]           Batch connect to all servers in current profile
+[white::b]📁 Profile Navigation:[white::-]
+[yellow]Tab[white]: Switch to next profile tab
+[yellow]Shift+Tab[white]: Switch to previous profile tab
+[yellow]p[white]: Cycle through all profiles
+[yellow]b[white]: Batch connect to entire profile
 
-[yellow::b]📋 Profile Management:[white::-]
-  [lime]c[white]           Create new profile
-  [lime]o[white]           Edit current profile name/description
-  [lime]x[white]           Delete current profile (with confirmation)
-  [lime]i[white]           Assign selected server to current profile
-  [lime]u[white]           Unassign selected server from current profile
+[white::b]⚙️  Profile Management:[white::-]
+[yellow]c[white]: Create new profile
+[yellow]o[white]: Edit current profile name/description
+[yellow]x[white]: Delete current profile (with confirmation)
+[yellow]i[white]: Assign server to current profile
+[yellow]u[white]: Unassign server from current profile
 
-[yellow::b]⚡ Navigation:[white::-]
-  [lime]↑/↓, j/k[white]    Move selection up/down in server list
-  [lime]s[white]           Switch focus to Sessions panel
-  [lime]Tab[white]         Navigate between profile tabs
+[white::b]🧭 Navigation:[white::-]
+[yellow]↑/↓, j/k[white]: Move selection up/down in server list
+[yellow]s[white]: Switch focus to Sessions panel
+[yellow]Home/End[white]: Jump to first/last server
 
-[yellow::b]💾 Configuration:[white::-]
-  [lime]m[white]           Import configuration (YAML/JSON/SSH config)
-  [lime]w[white]           Export configuration (YAML/JSON)
-  [lime]r[white]           Refresh data from configuration files
+[white::b]💾 Configuration:[white::-]
+[yellow]m[white]: Import config (YAML/JSON/SSH)
+[yellow]w[white]: Export configuration to file
+[yellow]r[white]: Refresh data from disk
 
-[yellow::b]🎯 Current Context:[white::-]
-  Active Panel:   [aqua]Servers[white]
-  Profile Filter: [aqua]%s[white]
-  Server Count:   [aqua]%d[white]
+[white::b]📊 Current Context:[white::-]
+Profile: [aqua]%s[white] 📋
+Server Count: [aqua]%d[white] 🖥️
 
-[green::b]💡 Tips:[white::-]
-[green]•[white] [yellow]Yellow border[white] indicates the active panel
-[green]•[white] Use [lime]Tab[white] to cycle through profiles when in server panel
-[green]•[white] [lime]Enter[white] creates tmux session and stays in TUI - switch to Sessions to attach
-[green]•[white] Profile filtering shows only servers assigned to the selected profile
+[green::b]💡 Pro Tips:[white::-]
+[green]•[white] [yellow]Yellow border[white] indicates the currently active panel
+[green]•[white] [yellow]Enter[white] creates persistent tmux sessions that survive disconnects
+[green]•[white] Profile filtering shows only matching servers
+[green]•[white] [yellow]b[white] connects all servers in profile as group session
 
-[gray]Press [lime]?[white] [lime]Enter[white] [lime]Escape[white] to close this help[gray]`,
+[lime]Press [white]?[lime] or [white]Enter[lime] or [white]Escape[white] to close • [lime]g[white] General • [lime]s[white] Shortcuts`,
 		h.getCurrentProfileName(),
 		h.getVisibleServerCount())
 }
 
 // getSessionsHelpContent returns help content specific to the sessions panel
 func (h *HelpSystem) getSessionsHelpContent() string {
-	return fmt.Sprintf(`[aqua::b]SSHM TUI Help - Sessions Panel[::-]
+	return fmt.Sprintf(`[yellow::b]🔗 SSHM Help - Sessions Panel  🔗[::-]
 
-[yellow::b]🔗 Session Management:[white::-]
-  [lime]Enter[white]       Attach to selected tmux session
-  [lime]y[white]           Kill selected session (with confirmation)
-  [lime]z[white]           Cleanup orphaned/inactive sessions
+[white::b]⚡ Session Management:[white::-]
+[yellow]Enter[white]: Attach to session (suspend TUI)
+[yellow]y[white]: Kill selected session
+[yellow]z[white]: Cleanup orphaned sessions
+[yellow]r[white]: Refresh session list manually
 
-[yellow::b]⚡ Navigation:[white::-]
-  [lime]↑/↓, j/k[white]    Move selection up/down in session list
-  [lime]s[white]           Switch focus back to Servers panel
+[white::b]🧭 Navigation:[white::-]
+[yellow]↑/↓, j/k[white]: Move up/down in session list
+[yellow]s[white]: Switch focus to Servers panel
+[yellow]Home/End[white]: Jump to first/last session
 
-[yellow::b]📊 Session Information:[white::-]
-  [aqua]Session[white]     tmux session name
-  [aqua]Status[white]      attached/detached/multi-attached
-  [aqua]Windows[white]     number of tmux windows in session
-  [aqua]Last Activity[white] when session was last used
+[white::b]🚦 Session Status Indicators:[white::-]
+[green]🟢 detached[white]: Ready to attach
+[yellow]🟡 attached[white]: One client connected
+[orange]🟠 multi-attached[white]: Multiple clients
+[red]🔴 inactive[white]: Connection issues
 
-[yellow::b]🎯 Current Context:[white::-]
-  Active Panel:    [aqua]Sessions[white]
-  Active Sessions: [aqua]%d[white]
-  tmux Available:  [aqua]%s[white]
+[white::b]📊 Current Context:[white::-]
+Active Sessions: [aqua]%d[white] 🔗
+tmux Available: [aqua]%s[white] ⚙️
+Auto-refresh: [aqua]Every 5 seconds[white] 🔄
 
-[yellow::b]🔄 Session States:[white::-]
-  [green]detached[white]      Session running, ready to attach
-  [yellow]attached[white]     Session has one client attached
-  [orange]multi-attached[white] Session has multiple clients
-  [red]inactive[white]        Session may have issues
+[green::b]💡 Pro Tips:[white::-]
+[green]•[white] [yellow]Enter[white] suspends TUI and attaches to tmux session
+[green]•[white] [yellow]Ctrl+B, d[white] in tmux returns to TUI automatically
+[green]•[white] [yellow]y[white] kills stuck sessions, [yellow]z[white] for bulk cleanup
+[green]•[white] Group sessions have multiple windows for easy management
 
-[green::b]💡 Tips:[white::-]
-[green]•[white] Sessions auto-refresh every 5 seconds
-[green]•[white] [lime]Enter[white] on a session suspends TUI and attaches to tmux
-[green]•[white] Detach from tmux ([lime]Ctrl+B, d[white]) returns to TUI automatically
-[green]•[white] Use [lime]y[white] to kill stuck sessions, [lime]z[white] for bulk cleanup
-[green]•[white] Group sessions (created with [lime]b[white]) have multiple windows
-
-[gray]Press [lime]?[white] [lime]Enter[white] [lime]Escape[white] to close this help[gray]`,
+[lime]Press [white]?[lime] or [white]Enter[lime] or [white]Escape[white] to close • [lime]g[white] General • [lime]s[white] Shortcuts`,
 		h.getActiveSessionCount(),
 		h.getTmuxAvailabilityStatus())
 }
 
 // getGeneralHelpContent returns general help content
 func (h *HelpSystem) getGeneralHelpContent() string {
-	return `[aqua::b]SSHM TUI Help - General Commands[::-]
+	return `[yellow::b]🌟 SSHM Help - General Guide  🌟[::-]
 
-[yellow::b]🚀 Quick Start:[white::-]
-  [lime]a[white]           Add your first server
-  [lime]c[white]           Create a profile to organize servers  
-  [lime]Enter[white]       Connect to server (creates tmux session)
-  [lime]s[white]           Switch to sessions panel to attach
+[white::b]🚀 Quick Start:[white::-]
+[yellow]a[white]: Add your first server
+[yellow]c[white]: Create a profile to organize servers
+[yellow]Enter[white]: Connect to server (creates tmux session)
+[yellow]s[white]: Switch to sessions panel
+[yellow]?[white]: Show context-sensitive help
 
-[yellow::b]⌨️  Global Shortcuts:[white::-]
-  [lime]q[white]           Quit application safely
-  [lime]?[white]           Show/hide this help (context-sensitive)
-  [lime]r[white]           Refresh all data and connections
-  [lime]s[white]           Switch focus between Servers and Sessions
+[white::b]⌨️  Global Shortcuts:[white::-]
+[yellow]q / Ctrl+C[white]: Quit application safely
+[yellow]?[white]: Show/hide help system
+[yellow]r[white]: Refresh all data
+[yellow]s[white]: Switch between panels
+[yellow]Escape[white]: Cancel/close modals
 
-[yellow::b]🖱️  Mouse Support:[white::-]
-  [lime]Click[white]       Select servers, sessions, and buttons
-  [lime]Scroll[white]      Navigate through long lists
-  [lime]Right-click[white] Context menu (where applicable)
+[white::b]💾 Configuration:[white::-]
+[yellow]m[white]: Import servers (YAML/JSON/SSH config)
+[yellow]w[white]: Export configuration to file
 
-[yellow::b]📁 File Operations:[white::-]
-  [lime]m[white]           Import servers from files:
-                   • YAML/JSON configuration files
-                   • SSH config files (~/.ssh/config format)
-                   • Automatic format detection
-  [lime]w[white]           Export current configuration:
-                   • YAML format (default)
-                   • JSON format option
-                   • Profile-specific exports
+Config: [aqua]~/.sshm/config.yaml[white] 📄
+Profiles: [aqua]~/.sshm/profiles/[white] 📁
 
-[yellow::b]🔧 Configuration:[white::-]
-  Config Location: [aqua]~/.sshm/config.yaml[white]
-  Profile Storage: [aqua]~/.sshm/profiles/[white]
-  Session Logs:    [aqua]~/.sshm/logs/[white]
+[green::b]💡 Best Practices:[white::-]
+[green]•[white] Create profiles for environments (dev/staging/prod)
+[green]•[white] Use [yellow]b[white] to connect to entire profile as group
+[green]•[white] tmux sessions persist - detach/reattach anytime
+[green]•[white] Import existing SSH configs to migrate easily
 
-[green::b]💡 Workflow Tips:[white::-]
-[green]•[white] Create profiles for different environments (dev/staging/prod)
-[green]•[white] Use [lime]b[white] to connect to entire profile as group session
-[green]•[white] tmux sessions persist - you can detach/reattach anytime
-[green]•[white] Sessions panel shows real-time status of all connections
-[green]•[white] Import existing SSH configs to migrate from other tools
+[orange::b]🆘 Troubleshooting:[white::-]
+[orange]•[white] No tmux: [yellow]brew install tmux[white] (macOS)
+[orange]•[white] Connection issues: check with [yellow]e[white] (edit)
+[orange]•[white] Stuck sessions: use [yellow]z[white] for cleanup
+[orange]•[white] Reset config: delete [yellow]~/.sshm/[white] directory
 
-[green::b]🆘 Troubleshooting:[white::-]
-[green]•[white] If tmux unavailable: install with [lime]brew install tmux[white] (macOS)
-[green]•[white] Connection issues: check server details with [lime]e[white]
-[green]•[white] Stuck sessions: use [lime]z[white] in Sessions panel for cleanup
-[green]•[white] Config problems: delete [lime]~/.sshm/[white] to reset
-
-[gray]Press [lime]?[white] [lime]Enter[white] [lime]Escape[white] to close this help[gray]`
+[lime]Press [white]?[lime] or [white]Enter[lime] or [white]Escape[white] to close • [lime]s[white] for Shortcuts • Context help available!`
 }
 
-// displayHelpModal creates and shows the help modal with enhanced styling
+// displayHelpModal creates and shows the enhanced help modal with proper sizing and scrolling
 func (h *HelpSystem) displayHelpModal(content string) {
+	// Use tview.Modal with enhanced content and sizing
 	modal := tview.NewModal().
 		SetText(content).
 		AddButtons([]string{"Close", "General Help", "Shortcuts Reference"}).
@@ -202,6 +185,9 @@ func (h *HelpSystem) displayHelpModal(content string) {
 		SetButtonBackgroundColor(tcell.ColorDarkGreen).
 		SetButtonTextColor(tcell.ColorWhite)
 
+	// Set modal title based on context
+	modal.SetTitle(fmt.Sprintf(" Help - %s ", h.getContextTitle()))
+
 	// Enhanced input capture for better keyboard handling
 	modal.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 		switch event.Key() {
@@ -222,7 +208,7 @@ func (h *HelpSystem) displayHelpModal(content string) {
 			}
 			return nil
 		}
-		
+
 		// Handle character keys
 		switch event.Rune() {
 		case '?':
@@ -242,13 +228,10 @@ func (h *HelpSystem) displayHelpModal(content string) {
 			h.closeHelpModal()
 			return nil
 		}
-		
+
 		return event
 	})
 
-	// Set modal title based on context
-	modal.SetTitle(fmt.Sprintf(" Help - %s ", h.getContextTitle()))
-	
 	// Show the modal
 	if h.app.modalManager != nil {
 		h.app.modalManager.ShowModal(modal)
@@ -260,54 +243,61 @@ func (h *HelpSystem) displayHelpModal(content string) {
 
 // getShortcutsReference returns a quick reference of all keyboard shortcuts
 func (h *HelpSystem) getShortcutsReference() string {
-	return `[aqua::b]SSHM TUI - Keyboard Shortcuts Reference[::-]
+	return `[yellow::b]⌨️  SSHM TUI - Keyboard Shortcuts Reference  ⌨️[::-]
 
-[yellow::b]🌐 Global Shortcuts (work anywhere):[white::-]
-  [lime]q / Ctrl+C[white]  Quit application
-  [lime]?[white]           Show context help
-  [lime]r[white]           Refresh data
-  [lime]s[white]           Switch panel focus
-  [lime]Escape[white]      Cancel/close modals
+[white::b]🌐 Global Shortcuts (work anywhere):[white::-]
+[yellow]q / Ctrl+C[white]: Quit application safely
+[yellow]?[white]: Show context-sensitive help
+[yellow]r[white]: Refresh all data from disk
+[yellow]s[white]: Switch focus between panels
+[yellow]Escape[white]: Cancel/close modals and dialogs
 
-[yellow::b]🖥️  Servers Panel:[white::-]
-  [lime]↑/↓ or j/k[white]  Navigate server list
-  [lime]Enter[white]       Connect to server
-  [lime]a[white]           Add server
-  [lime]e[white]           Edit server
-  [lime]d[white]           Delete server
-  [lime]Tab/Shift+Tab[white] Switch profiles
-  [lime]p[white]           Next profile
-  [lime]b[white]           Batch connect profile
-  [lime]c[white]           Create profile
-  [lime]o[white]           Edit profile
-  [lime]x[white]           Delete profile
-  [lime]i[white]           Assign server to profile
-  [lime]u[white]           Unassign server from profile
+[white::b]🖥️  Servers Panel Navigation:[white::-]
+[yellow]↑/↓ or j/k[white]: Navigate up/down in server list
+[yellow]Enter[white]: Connect to selected server
+[yellow]Home/End[white]: Jump to first/last server
+[yellow]Tab/Shift+Tab[white]: Switch between profile tabs
+[yellow]p[white]: Cycle to next profile
 
-[yellow::b]🔗 Sessions Panel:[white::-]
-  [lime]↑/↓ or j/k[white]  Navigate session list
-  [lime]Enter[white]       Attach to session
-  [lime]y[white]           Kill session
-  [lime]z[white]           Cleanup orphaned sessions
+[white::b]🔧 Server Management:[white::-]
+[yellow]a[white]: Add new server configuration
+[yellow]e[white]: Edit selected server details
+[yellow]d[white]: Delete server (with confirmation)
+[yellow]i[white]: Assign server to current profile
+[yellow]u[white]: Unassign server from profile
 
-[yellow::b]📁 Configuration:[white::-]
-  [lime]m[white]           Import configuration
-  [lime]w[white]           Export configuration
+[white::b]📋 Profile Operations:[white::-]
+[yellow]c[white]: Create new profile
+[yellow]o[white]: Edit current profile name/description
+[yellow]x[white]: Delete current profile (with confirmation)
+[yellow]b[white]: Batch connect to entire profile
 
-[yellow::b]📝 Forms & Modals:[white::-]
-  [lime]Tab/Shift+Tab[white] Navigate form fields
-  [lime]Enter[white]       Submit/confirm
-  [lime]Escape[white]      Cancel/close
-  [lime]Ctrl+A[white]      Select all text
-  [lime]Ctrl+E[white]      Move to end of line
+[white::b]🔗 Sessions Panel:[white::-]
+[yellow]↑/↓ or j/k[white]: Navigate session list
+[yellow]Enter[white]: Attach to session (suspend TUI)
+[yellow]y[white]: Kill selected session
+[yellow]z[white]: Cleanup orphaned sessions
+[yellow]Home/End[white]: Jump to first/last session
 
-[green::b]💡 Pro Tips:[white::-]
-[green]•[white] Hold [lime]Shift[white] with arrow keys for extended selection
-[green]•[white] [lime]Tab[white] in help switches between panel contexts  
-[green]•[white] Most operations have confirmation dialogs for safety
-[green]•[white] Use [lime]?[white] in different panels for context-specific help
+[white::b]📁 Configuration Management:[white::-]
+[yellow]m[white]: Import config (YAML/JSON/SSH)
+[yellow]w[white]: Export configuration to file
 
-[gray]Press [lime]?[white] [lime]Enter[white] [lime]Escape[white] to close[gray]`
+[white::b]📝 Forms & Modal Navigation:[white::-]
+[yellow]Tab/Shift+Tab[white]: Navigate between form fields
+[yellow]Enter[white]: Submit form/confirm action
+[yellow]Escape[white]: Cancel form/close modal
+[yellow]Ctrl+A[white]: Select all text in field
+[yellow]Ctrl+E[white]: Move cursor to end of line
+
+[green::b]💡 Pro Tips & Tricks:[white::-]
+[green]•[white] Hold [yellow]Shift[white] with arrow keys for extended text selection
+[green]•[white] Press [yellow]Tab[white] in help to switch between panel contexts
+[green]•[white] Most destructive operations have confirmation dialogs
+[green]•[white] Use [yellow]?[white] in different panels for context-specific help
+[green]•[white] [yellow]Enter[white] in tmux creates persistent sessions that survive disconnects
+
+[lime]Press [white]?[lime] or [white]Enter[lime] or [white]Escape[white] to close • [lime]g[white] General • [lime]Tab[white] Switch contexts`
 }
 
 // Helper methods for dynamic content
@@ -389,7 +379,7 @@ Press [lime]?[white] for detailed help`
 		SetBackgroundColor(tcell.ColorDarkGreen)
 
 	modal.SetTitle(" Quick Help ")
-	
+
 	if h.app.modalManager != nil {
 		h.app.modalManager.ShowModal(modal)
 	} else {
