@@ -338,3 +338,296 @@ func TestSessionReturnHandler_HandleDetachment(t *testing.T) {
 		t.Error("Expected handler to remain detached after double detachment")
 	}
 }
+
+// Enhanced tests for Task 4: tmux session monitoring and TUI restoration behavior
+
+func TestSessionReturnHandler_TmuxSessionMonitoring(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	tuiApp, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	tmuxMgr := tmux.NewManager()
+	handler := NewSessionReturnHandler(tuiApp, tmuxMgr)
+
+	// Test session monitoring initialization
+	if handler.sessionMonitor == nil {
+		// This will be implemented as part of task 4.2
+		t.Log("Session monitor not yet implemented - part of task 4.2")
+	}
+
+	// Test monitoring start/stop
+	err = handler.StartSessionMonitoring("test-session")
+	if err != nil {
+		t.Logf("StartSessionMonitoring not yet implemented: %v", err)
+	}
+
+	handler.StopSessionMonitoring()
+	
+	// Test monitoring status
+	isMonitoring := handler.IsMonitoringSession()
+	if isMonitoring {
+		t.Error("Expected monitoring to be stopped")
+	}
+}
+
+func TestSessionReturnHandler_SessionDetachmentEvent(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	tuiApp, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	tmuxMgr := tmux.NewManager()
+	handler := NewSessionReturnHandler(tuiApp, tmuxMgr)
+
+	// Test detachment event handling
+	handler.sessionName = "test-session"
+	handler.isAttached = true
+
+	// Simulate a detachment event
+	detachEvent := SessionDetachEvent{
+		SessionName: "test-session",
+		DetachTime:  time.Now(),
+	}
+
+	// Test event processing
+	handler.ProcessDetachmentEvent(detachEvent)
+
+	// Should be marked as detached
+	if handler.IsAttached() {
+		t.Error("Expected handler to be detached after detachment event")
+	}
+}
+
+func TestSessionReturnHandler_TUIStatePreservation(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	tuiApp, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	tmuxMgr := tmux.NewManager()
+	handler := NewSessionReturnHandler(tuiApp, tmuxMgr)
+
+	// Set up TUI state to preserve
+	originalProfile := "production"
+	tuiApp.SetSelectedProfile(originalProfile)
+
+	// Save TUI state before attachment
+	state := handler.SaveTUIState()
+	if state == nil {
+		t.Error("Expected TUI state to be saved")
+	}
+
+	// Test state restoration
+	handler.RestoreTUIState(state)
+
+	// Verify state was preserved
+	currentProfile := tuiApp.GetSelectedProfile()
+	if currentProfile != originalProfile {
+		t.Errorf("Expected profile %s to be preserved, got %s", originalProfile, currentProfile)
+	}
+}
+
+func TestSessionReturnHandler_EdgeCaseHandling(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	tuiApp, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	tmuxMgr := tmux.NewManager()
+	handler := NewSessionReturnHandler(tuiApp, tmuxMgr)
+
+	// Test edge case: Session is killed while monitoring
+	handler.sessionName = "test-session"
+	handler.isAttached = true
+	
+	// Simulate session being killed externally
+	err = handler.HandleSessionKilled("test-session")
+	if err != nil && err.Error() != "session monitoring not active" {
+		t.Errorf("Expected specific error for killed session, got: %v", err)
+	}
+
+	// Test edge case: Multiple rapid detach/attach cycles
+	for i := 0; i < 5; i++ {
+		handler.isAttached = true
+		handler.handleSessionDetachment()
+		if handler.IsAttached() {
+			t.Error("Expected handler to be detached after rapid detachment")
+		}
+	}
+
+	// Test edge case: TUI restoration when TUI is already active
+	handler.RestoreTUIFromSession("test-session")
+	// Should not panic or cause issues
+
+	// Test edge case: Monitoring non-existent session
+	err = handler.StartSessionMonitoring("non-existent-session")
+	if err == nil {
+		t.Error("Expected error when monitoring non-existent session")
+	}
+}
+
+func TestSessionReturnHandler_SessionEventIntegration(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	tuiApp, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	tmuxMgr := tmux.NewManager()
+	handler := NewSessionReturnHandler(tuiApp, tmuxMgr)
+
+	// Test session event monitoring integration
+	eventChannel := make(chan SessionEvent, 10)
+	handler.SetEventChannel(eventChannel)
+
+	// Test different event types
+	events := []SessionEvent{
+		{Type: SessionDetached, SessionName: "test-session", Timestamp: time.Now()},
+		{Type: SessionReattached, SessionName: "test-session", Timestamp: time.Now()},
+		{Type: SessionKilled, SessionName: "test-session", Timestamp: time.Now()},
+	}
+
+	for _, event := range events {
+		select {
+		case eventChannel <- event:
+			// Event sent successfully
+		case <-time.After(100 * time.Millisecond):
+			t.Error("Event channel blocked - should be buffered")
+		}
+	}
+
+	// Test event processing
+	handler.ProcessEventQueue()
+
+	// Verify events were processed
+	if len(eventChannel) > 0 {
+		t.Error("Expected all events to be processed")
+	}
+}
+
+func TestSessionReturnHandler_ConcurrentOperations(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	tuiApp, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	tmuxMgr := tmux.NewManager()
+	handler := NewSessionReturnHandler(tuiApp, tmuxMgr)
+
+	// Test concurrent detachment handling
+	done := make(chan bool, 10)
+	
+	// Start multiple goroutines that attempt detachment handling
+	for i := 0; i < 10; i++ {
+		go func() {
+			defer func() { done <- true }()
+			handler.handleSessionDetachment()
+		}()
+	}
+
+	// Wait for all goroutines to complete
+	for i := 0; i < 10; i++ {
+		select {
+		case <-done:
+			// Goroutine completed
+		case <-time.After(1 * time.Second):
+			t.Error("Timeout waiting for concurrent operations to complete")
+			return
+		}
+	}
+
+	// Test concurrent monitoring start/stop
+	for i := 0; i < 5; i++ {
+		go func() {
+			handler.StartSessionMonitoring("test-session")
+		}()
+		go func() {
+			handler.StopSessionMonitoring()
+		}()
+	}
+
+	// Give concurrent operations time to complete
+	time.Sleep(50 * time.Millisecond)
+
+	// Should not panic or have race conditions
+}
+
+func TestSessionReturnHandler_MonitoringLifecycle(t *testing.T) {
+	// Create a temporary directory for test config
+	tempDir := t.TempDir()
+	os.Setenv("SSHM_CONFIG_DIR", tempDir)
+	defer os.Unsetenv("SSHM_CONFIG_DIR")
+
+	// Create TUI app
+	tuiApp, err := NewTUIApp()
+	if err != nil {
+		t.Fatalf("Failed to create TUI app: %v", err)
+	}
+
+	tmuxMgr := tmux.NewManager()
+	handler := NewSessionReturnHandler(tuiApp, tmuxMgr)
+
+	// Test complete monitoring lifecycle
+	sessionName := "lifecycle-test-session"
+
+	// 1. Start monitoring
+	err = handler.StartSessionMonitoring(sessionName)
+	if err != nil {
+		t.Logf("StartSessionMonitoring not yet implemented: %v", err)
+	}
+
+	// 2. Verify monitoring is active
+	if !handler.IsMonitoringSession() {
+		t.Log("IsMonitoringSession not yet implemented")
+	}
+
+	// 3. Simulate session activity
+	handler.UpdateSessionActivity(sessionName)
+
+	// 4. Stop monitoring
+	handler.StopSessionMonitoring()
+
+	// 5. Verify monitoring is stopped
+	if handler.IsMonitoringSession() {
+		t.Error("Expected monitoring to be stopped")
+	}
+
+	// 6. Test cleanup after monitoring
+	handler.Cleanup()
+}

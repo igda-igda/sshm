@@ -1918,3 +1918,110 @@ func (t *TUIApp) unassignServerFromProfile() {
 	}
 	t.ShowServerUnassignmentModal(t.currentFilter)
 }
+
+// Session handler integration methods
+
+// GetSelectedProfile returns the currently selected profile
+func (t *TUIApp) GetSelectedProfile() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.currentFilter
+}
+
+// SetSelectedProfile sets the currently selected profile
+func (t *TUIApp) SetSelectedProfile(profileName string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	
+	// Handle empty profile name (All)
+	if profileName == "" || profileName == "All" {
+		t.selectedProfileIndex = 0
+		t.currentFilter = ""
+		return
+	}
+	
+	// Find the profile index
+	profileFound := false
+	for i, profile := range t.profileTabs {
+		if profile == profileName {
+			t.selectedProfileIndex = i
+			t.currentFilter = profileName
+			profileFound = true
+			break
+		}
+	}
+	
+	// If profile not found, just set the current filter directly
+	if !profileFound {
+		t.currentFilter = profileName
+	}
+	
+	// Update the UI to reflect the profile change (only if we have a layout)
+	if t.layout != nil {
+		t.updateProfileDisplay()
+		t.refreshServerList()
+	}
+}
+
+// GetSelectedProfileIndex returns the currently selected profile index
+func (t *TUIApp) GetSelectedProfileIndex() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.selectedProfileIndex
+}
+
+// GetSelectedRow returns the currently selected row
+func (t *TUIApp) GetSelectedRow() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.selectedRow
+}
+
+// SetSelectedRow sets the currently selected row
+func (t *TUIApp) SetSelectedRow(row int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.selectedRow = row
+}
+
+// GetSelectedSession returns the currently selected session
+func (t *TUIApp) GetSelectedSession() int {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.selectedSession
+}
+
+// SetSelectedSession sets the currently selected session
+func (t *TUIApp) SetSelectedSession(session int) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.selectedSession = session
+}
+
+// GetFocusedPanel returns the currently focused panel
+func (t *TUIApp) GetFocusedPanel() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.focusedPanel
+}
+
+// SetFocusedPanel sets the currently focused panel
+func (t *TUIApp) SetFocusedPanel(panel string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.focusedPanel = panel
+}
+
+// GetCurrentFilter returns the current filter
+func (t *TUIApp) GetCurrentFilter() string {
+	t.mu.RLock()
+	defer t.mu.RUnlock()
+	return t.currentFilter
+}
+
+// SetCurrentFilter sets the current filter
+func (t *TUIApp) SetCurrentFilter(filter string) {
+	t.mu.Lock()
+	defer t.mu.Unlock()
+	t.currentFilter = filter
+}
