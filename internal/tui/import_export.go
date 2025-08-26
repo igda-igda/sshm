@@ -3,7 +3,9 @@ package tui
 import (
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 
@@ -58,41 +60,45 @@ func (ie *ImportExportModal) show() {
 		actionIcon = "📤"
 	}
 
-	// Create professional modal layout
-	ie.createProfessionalModal(title, instruction, actionIcon)
+	// Create centered professional modal layout
+	ie.createCenteredModal(title, instruction, actionIcon)
 }
 
-// createProfessionalModal creates a compact, professional-looking modal
-func (ie *ImportExportModal) createProfessionalModal(title, instruction, actionIcon string) {
+// createCenteredModal creates a compact, professional-looking modal centered in screen
+func (ie *ImportExportModal) createCenteredModal(title, instruction, actionIcon string) {
 	// Create form fields
 	ie.createFormFields()
 
-	// Create compact header with icon and title
+	// Create professional header with icon and title
 	headerText := tview.NewTextView()
-	headerText.SetText(fmt.Sprintf("[aqua::b]%s %s[lightgray] - %s[white]", actionIcon, title, instruction)).
+	headerText.SetText(fmt.Sprintf("[aqua::b]%s %s[white::-]\n[lightgray]%s[white]", actionIcon, title, instruction)).
 		SetTextAlign(tview.AlignCenter).
 		SetDynamicColors(true)
 
 	// Create compact form fields layout
-	fieldsLayout := ie.createCompactFieldsLayout()
+	fieldsLayout := ie.createCenteredFieldsLayout()
 	
 	// Create compact buttons layout
 	buttonsLayout := ie.createCompactButtonsLayout()
 	
-	// Create progress text (initially hidden)
+	// Create progress/suggestions text area (for fzf dropdown and progress)
 	ie.progressText = tview.NewTextView()
 	ie.progressText.SetDynamicColors(true).
-		SetTextAlign(tview.AlignCenter).
-		SetText("")
+		SetTextAlign(tview.AlignLeft).  // Left align for fzf suggestions
+		SetText("").
+		SetBorder(false)
 	
-	// Create main content layout - much more compact
+	// Create main content layout - professional with optimal spacing
 	contentLayout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(headerText, 1, 0, false).
-		AddItem(fieldsLayout, 0, 1, true).
-		AddItem(buttonsLayout, 1, 0, false).
-		AddItem(ie.progressText, 1, 0, false)
+		AddItem(headerText, 2, 0, false).              // More space for 2-line header
+		AddItem(tview.NewBox(), 1, 0, false).          // Spacing after header
+		AddItem(fieldsLayout, 0, 1, true).             // Main content area
+		AddItem(tview.NewBox(), 1, 0, false).          // Spacing before buttons
+		AddItem(buttonsLayout, 1, 0, false).           // Button row
+		AddItem(tview.NewBox(), 1, 0, false).          // Spacing after buttons
+		AddItem(ie.progressText, 10, 0, false)         // Generous space for fzf suggestions
 	
-	// Create border with professional styling - smaller size
+	// Create border with professional styling
 	border := tview.NewFlex()
 	border.SetBorder(true).
 		SetBorderColor(tcell.ColorAqua).
@@ -100,186 +106,136 @@ func (ie *ImportExportModal) createProfessionalModal(title, instruction, actionI
 		SetTitleColor(tcell.ColorAqua)
 	border.AddItem(contentLayout, 0, 1, true)
 	
-	// Set up key bindings
-	ie.setupKeyBindings(border)
+	// Center the modal in screen - create centering flex containers with bigger size for fzf
+	centeredModal := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(tview.NewBox(), 0, 1, false).  // Left padding
+		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(tview.NewBox(), 0, 1, false). // Top padding
+			AddItem(border, 35, 0, true).         // Even taller modal for better spacing
+			AddItem(tview.NewBox(), 0, 1, false), // Bottom padding
+			80, 0, true).                         // Wider modal for better content space
+		AddItem(tview.NewBox(), 0, 1, false)   // Right padding
 	
-	// Show modal with smaller size
+	// Set up key bindings
+	ie.setupKeyBindings(centeredModal)
+	
+	// Show centered modal
 	if ie.app.modalManager != nil {
-		ie.app.modalManager.ShowModal(border)
+		ie.app.modalManager.ShowModal(centeredModal)
 	} else {
-		ie.app.app.SetRoot(border, true)
+		ie.app.app.SetRoot(centeredModal, true)
 		ie.app.app.SetFocus(fieldsLayout)
 	}
 }
 
-// createCompactFieldsLayout creates a more compact form fields layout
-func (ie *ImportExportModal) createCompactFieldsLayout() *tview.Flex {
-	// Create file path section - single line
-	filePathRow := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(tview.NewTextView().SetText("[yellow]📁 File:[white]").SetDynamicColors(true), 10, 0, false).
-		AddItem(ie.filePathField, 0, 1, true).
-		AddItem(tview.NewButton("📂").SetSelectedFunc(ie.showFileSystemBrowser), 4, 0, false)
-	
-	// Create format section - single line
-	formatRow := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(tview.NewTextView().SetText("[yellow]📋 Format:[white]").SetDynamicColors(true), 10, 0, false).
-		AddItem(ie.formatField, 0, 1, false).
-		AddItem(tview.NewBox(), 4, 0, false) // Spacer to align with browse button above
-	
-	// Create main fields layout - very compact
-	fieldsLayout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(filePathRow, 1, 0, true).
-		AddItem(formatRow, 1, 0, false)
-	
-	// Add profile section for export (if needed)
-	if !ie.isImport {
-		profileRow := tview.NewFlex().SetDirection(tview.FlexColumn).
-			AddItem(tview.NewTextView().SetText("[yellow]🏷️  Profile:[white]").SetDynamicColors(true), 10, 0, false).
-			AddItem(ie.profileField, 0, 1, false).
-			AddItem(tview.NewBox(), 4, 0, false) // Spacer
-		
-		fieldsLayout.AddItem(profileRow, 1, 0, false)
-	}
-	
-	return fieldsLayout
-}
-
-// createFieldsLayout creates the form fields with professional layout
-func (ie *ImportExportModal) createFieldsLayout() *tview.Flex {
-	// Create file path section
+// createCenteredFieldsLayout creates a professional form fields layout with proper spacing
+func (ie *ImportExportModal) createCenteredFieldsLayout() *tview.Flex {
+	// Create file path section with full-width input
 	filePathLabel := tview.NewTextView()
-	filePathLabel.SetText("[yellow::b]📁 File Path:[white::-]").
-		SetDynamicColors(true)
+	filePathLabel.SetText("[yellow::b]📁 File Path[white::-]").
+		SetDynamicColors(true).
+		SetTextAlign(tview.AlignLeft)
 	
-	filePathLayout := ie.createFilePathInputWithBrowser()
+	// Make input field span full width with padding
+	filePathInputRow := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(tview.NewBox(), 1, 0, false).        // Left padding
+		AddItem(ie.filePathField, 0, 1, true).       // Full-width input
+		AddItem(tview.NewBox(), 1, 0, false)         // Right padding
 	
-	// Create format section
-	formatLabel := tview.NewTextView()
-	formatLabel.SetText("[yellow::b]📋 Format:[white::-]").
-		SetDynamicColors(true)
-	
-	// Create profile section (export only)
-	var profileSection *tview.Flex
-	if !ie.isImport {
-		profileLabel := tview.NewTextView()
-		profileLabel.SetText("[yellow::b]🏷️  Profile Filter:[white::-]").
-			SetDynamicColors(true)
-		
-		profileSection = tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(profileLabel, 1, 0, false).
-			AddItem(ie.profileField, 1, 0, false)
-	}
-	
-	// Create main fields layout
-	fieldsLayout := tview.NewFlex().SetDirection(tview.FlexRow).
+	filePathSection := tview.NewFlex().SetDirection(tview.FlexRow).
 		AddItem(filePathLabel, 1, 0, false).
-		AddItem(filePathLayout, 2, 0, false).
-		AddItem(tview.NewTextView(), 1, 0, false). // Spacer
-		AddItem(formatLabel, 1, 0, false).
-		AddItem(ie.formatField, 1, 0, false)
+		AddItem(tview.NewBox(), 1, 0, false).        // Spacing
+		AddItem(filePathInputRow, 1, 0, true)
 	
-	if profileSection != nil {
-		fieldsLayout.
-			AddItem(tview.NewTextView(), 1, 0, false). // Spacer
-			AddItem(profileSection, 2, 0, false)
-	}
-	
-	return fieldsLayout
-}
-
-// createFilePathInputWithBrowser creates file path input with browse functionality
-func (ie *ImportExportModal) createFilePathInputWithBrowser() *tview.Flex {
-	// Create browse button
-	browseButton := tview.NewButton("📂 Browse")
-	browseButton.SetSelectedFunc(func() {
-		ie.showFileSystemBrowser()
-	})
-	
-	// Style the button
+	// Create bigger, centered browse button with more spacing
+	browseButton := tview.NewButton("📂 Browse Files")
+	browseButton.SetSelectedFunc(ie.showBuiltInFileSystemBrowser)
 	browseButton.SetBackgroundColor(tcell.ColorDarkBlue)
 	
-	// Create layout with input field and browse button
-	pathLayout := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(ie.filePathField, 0, 4, true).
-		AddItem(browseButton, 12, 0, false)
+	browseButtonRow := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(tview.NewBox(), 0, 1, false).        // Left spacer
+		AddItem(browseButton, 24, 0, false).         // Bigger button
+		AddItem(tview.NewBox(), 0, 1, false)         // Right spacer
 	
-	return pathLayout
-}
-
-// createCompactButtonsLayout creates compact action buttons
-func (ie *ImportExportModal) createCompactButtonsLayout() *tview.Flex {
-	// Create action button
-	var actionButton *tview.Button
-	if ie.isImport {
-		actionButton = tview.NewButton("📥 Import")
-		actionButton.SetSelectedFunc(ie.handleImport)
-	} else {
-		actionButton = tview.NewButton("📤 Export")
-		actionButton.SetSelectedFunc(ie.handleExport)
+	// Create format section with centered dropdown
+	formatLabel := tview.NewTextView()
+	formatLabel.SetText("[yellow::b]📋 Format[white::-]").
+		SetDynamicColors(true).
+		SetTextAlign(tview.AlignLeft)
+	
+	formatDropdownRow := tview.NewFlex().SetDirection(tview.FlexColumn).
+		AddItem(tview.NewBox(), 0, 1, false).        // Left spacer
+		AddItem(ie.formatField, 20, 0, false).       // Centered dropdown
+		AddItem(tview.NewBox(), 0, 1, false)         // Right spacer
+	
+	formatSection := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(formatLabel, 1, 0, false).
+		AddItem(tview.NewBox(), 1, 0, false).        // Spacing
+		AddItem(formatDropdownRow, 1, 0, false)
+	
+	// Create main fields layout with better spacing
+	fieldsLayout := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(filePathSection, 3, 0, true).       // File path with more space
+		AddItem(tview.NewBox(), 1, 0, false).       // Spacer
+		AddItem(browseButtonRow, 1, 0, false).      // Browse button
+		AddItem(tview.NewBox(), 2, 0, false).       // Larger spacer
+		AddItem(formatSection, 3, 0, false)         // Format section
+	
+	// Add profile section for export (if needed) with consistent styling
+	if !ie.isImport {
+		profileLabel := tview.NewTextView()
+		profileLabel.SetText("[yellow::b]🏷️  Profile Filter[white::-]").
+			SetDynamicColors(true).
+			SetTextAlign(tview.AlignLeft)
+		
+		profileDropdownRow := tview.NewFlex().SetDirection(tview.FlexColumn).
+			AddItem(tview.NewBox(), 0, 1, false).    // Left spacer
+			AddItem(ie.profileField, 20, 0, false).  // Centered dropdown
+			AddItem(tview.NewBox(), 0, 1, false)     // Right spacer
+		
+		profileSection := tview.NewFlex().SetDirection(tview.FlexRow).
+			AddItem(profileLabel, 1, 0, false).
+			AddItem(tview.NewBox(), 1, 0, false).    // Spacing
+			AddItem(profileDropdownRow, 1, 0, false)
+		
+		fieldsLayout.AddItem(tview.NewBox(), 2, 0, false) // Larger spacer
+		fieldsLayout.AddItem(profileSection, 3, 0, false) // Profile section
 	}
-	actionButton.SetBackgroundColor(tcell.ColorDarkGreen)
 	
-	// Create cancel button
-	cancelButton := tview.NewButton("❌ Cancel")
-	cancelButton.SetSelectedFunc(ie.handleCancel)
-	cancelButton.SetBackgroundColor(tcell.ColorDarkRed)
-	
-	// Create compact button layout
-	buttonLayout := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(tview.NewBox(), 0, 1, false). // Spacer
-		AddItem(actionButton, 12, 0, false).
-		AddItem(tview.NewBox(), 2, 0, false). // Small spacer
-		AddItem(cancelButton, 12, 0, false).
-		AddItem(tview.NewBox(), 0, 1, false)  // Spacer
-	
-	return buttonLayout
+	return fieldsLayout
 }
 
-// createButtonsLayout creates the action buttons with professional styling
-func (ie *ImportExportModal) createButtonsLayout() *tview.Flex {
-	// Create action button
+
+// createCompactButtonsLayout creates professional action buttons with better spacing
+func (ie *ImportExportModal) createCompactButtonsLayout() *tview.Flex {
+	// Create action button with improved styling
 	var actionButton *tview.Button
 	if ie.isImport {
 		actionButton = tview.NewButton("📥 Import Configuration")
 		actionButton.SetSelectedFunc(ie.handleImport)
-		actionButton.SetBackgroundColor(tcell.ColorDarkGreen)
 	} else {
 		actionButton = tview.NewButton("📤 Export Configuration")
 		actionButton.SetSelectedFunc(ie.handleExport)
-		actionButton.SetBackgroundColor(tcell.ColorDarkGreen)
 	}
+	actionButton.SetBackgroundColor(tcell.ColorDarkGreen)
 	
-	// Create cancel button
+	// Create cancel button with improved styling
 	cancelButton := tview.NewButton("❌ Cancel")
 	cancelButton.SetSelectedFunc(ie.handleCancel)
 	cancelButton.SetBackgroundColor(tcell.ColorDarkRed)
 	
-	// Create button layout
+	// Create professional button layout with better spacing
 	buttonLayout := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(tview.NewBox(), 0, 1, false). // Spacer
-		AddItem(actionButton, 24, 0, false).
-		AddItem(tview.NewBox(), 2, 0, false). // Spacer
-		AddItem(cancelButton, 14, 0, false).
-		AddItem(tview.NewBox(), 0, 1, false)  // Spacer
+		AddItem(tview.NewBox(), 0, 1, false).     // Spacer
+		AddItem(actionButton, 24, 0, false).      // Wider action button
+		AddItem(tview.NewBox(), 4, 0, false).     // Larger spacer between buttons
+		AddItem(cancelButton, 14, 0, false).      // Cancel button
+		AddItem(tview.NewBox(), 0, 1, false)      // Spacer
 	
 	return buttonLayout
 }
 
-// showFileSystemBrowser shows a file system browser modal
-func (ie *ImportExportModal) showFileSystemBrowser() {
-	browser := NewFileSystemBrowser(ie.isImport, func(selectedPath string) {
-		if selectedPath != "" {
-			ie.filePathField.SetText(selectedPath)
-			// Auto-detect format based on file extension
-			if ie.isImport {
-				format := ie.detectFileFormat(selectedPath)
-				ie.setFormatSelection(format)
-			}
-		}
-	})
-	
-	browser.Show(ie.app)
-}
+
 
 // setFormatSelection sets the format dropdown based on detected format
 func (ie *ImportExportModal) setFormatSelection(format string) {
@@ -321,305 +277,200 @@ func (ie *ImportExportModal) setFormatSelection(format string) {
 	}
 }
 
-// setupFuzzyFinder sets up visual fuzzy finder functionality like fzf
-func (ie *ImportExportModal) setupFuzzyFinder() {
-	var fuzzyModal *tview.Modal
-	var fuzzyList *tview.List
-	var suggestions []string
-	var originalText string
+// launchExternalFzf launches the external fzf binary for file selection in fullscreen
+func (ie *ImportExportModal) launchExternalFzf() {
+	// Check if fzf is available
+	if !ie.isFzfAvailable() {
+		ie.showFzfInstallationModal()
+		return
+	}
 	
-	// Create the visual fuzzy finder interface
-	ie.filePathField.SetChangedFunc(func(text string) {
-		// Store original text for potential restoration
-		if originalText == "" {
-			originalText = text
+	// Suspend the TUI application
+	ie.app.app.Suspend(func() {
+		// Set up fzf search directory
+		searchDir, err := os.UserHomeDir()
+		if err != nil {
+			searchDir = "/"
 		}
 		
-		// Clear suggestions if text is too short
-		if len(strings.TrimSpace(text)) < 2 {
-			if fuzzyModal != nil {
-				ie.hideFuzzyFinder(fuzzyModal)
-				fuzzyModal = nil
-			}
-			return
-		}
-		
-		// Get directory suggestions
-		suggestions = ie.getFuzzyFinderSuggestions(text)
-		if len(suggestions) > 0 {
-			ie.showVisualFuzzyFinder(text, suggestions, &fuzzyModal, &fuzzyList)
-		} else if fuzzyModal != nil {
-			ie.hideFuzzyFinder(fuzzyModal)
-			fuzzyModal = nil
-		}
-	})
-	
-	// Set up key handling for fuzzy finder
-	ie.filePathField.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		// Handle keys when fuzzy finder is visible
-		if fuzzyModal != nil && fuzzyList != nil {
-			switch event.Key() {
-			case tcell.KeyDown, tcell.KeyCtrlN:
-				// Navigate down in suggestions
-				currentItem := fuzzyList.GetCurrentItem()
-				if currentItem < len(suggestions)-1 {
-					fuzzyList.SetCurrentItem(currentItem + 1)
-				}
-				return nil
-			case tcell.KeyUp, tcell.KeyCtrlP:
-				// Navigate up in suggestions
-				currentItem := fuzzyList.GetCurrentItem()
-				if currentItem > 0 {
-					fuzzyList.SetCurrentItem(currentItem - 1)
-				}
-				return nil
-			case tcell.KeyTab, tcell.KeyEnter:
-				// Select current suggestion
-				if len(suggestions) > 0 {
-					currentItem := fuzzyList.GetCurrentItem()
-					if currentItem >= 0 && currentItem < len(suggestions) {
-						ie.filePathField.SetText(suggestions[currentItem])
-						ie.hideFuzzyFinder(fuzzyModal)
-						fuzzyModal = nil
-					}
-				}
-				return nil
-			case tcell.KeyEscape:
-				// Cancel fuzzy finder
-				ie.hideFuzzyFinder(fuzzyModal)
-				fuzzyModal = nil
-				originalText = ""
-				return nil
-			}
-		}
-		
-		return event
-	})
-}
-
-// getFuzzyFinderSuggestions returns file/directory suggestions based on current input
-func (ie *ImportExportModal) getFuzzyFinderSuggestions(input string) []string {
-	var suggestions []string
-	
-	// Determine the directory to search and the search term
-	var searchDir, searchTerm string
-	if strings.Contains(input, "/") {
-		// Input contains path separators
-		searchDir = filepath.Dir(input)
-		searchTerm = filepath.Base(input)
-	} else {
-		// Search in current directory or home directory
-		searchDir = "."
-		if homeDir, err := os.UserHomeDir(); err == nil {
-			searchDir = homeDir
-		}
-		searchTerm = input
-	}
-	
-	// If searchDir is relative and doesn't exist, try to make it absolute
-	if !filepath.IsAbs(searchDir) {
-		if absDir, err := filepath.Abs(searchDir); err == nil {
-			searchDir = absDir
-		}
-	}
-	
-	// Read directory
-	entries, err := os.ReadDir(searchDir)
-	if err != nil {
-		return suggestions
-	}
-	
-	// Filter entries based on search term and requirements
-	searchTermLower := strings.ToLower(searchTerm)
-	for _, entry := range entries {
-		name := entry.Name()
-		nameLower := strings.ToLower(name)
-		
-		// Skip hidden files unless specifically searching for them
-		if strings.HasPrefix(name, ".") && !strings.HasPrefix(searchTerm, ".") {
-			continue
-		}
-		
-		// Check if name matches search term (fuzzy matching)
-		if ie.fuzzyMatch(nameLower, searchTermLower) {
-			var suggestion string
-			if strings.Contains(input, "/") {
-				// Maintain the directory path
-				suggestion = filepath.Join(searchDir, name)
-			} else {
-				suggestion = name
-			}
-			
-			// For import mode, prefer files with supported extensions
-			if ie.isImport && !entry.IsDir() {
-				ext := strings.ToLower(filepath.Ext(name))
-				supportedExts := []string{".yaml", ".yml", ".json", ".config"}
-				supported := false
-				for _, supportedExt := range supportedExts {
-					if ext == supportedExt || name == "config" {
-						supported = true
-						break
-					}
-				}
-				if supported {
-					// Add supported files first
-					suggestions = append([]string{suggestion}, suggestions...)
-				}
-			} else if entry.IsDir() {
-				// Add directories
-				suggestions = append(suggestions, suggestion+"/")
-			} else if !ie.isImport {
-				// For export mode, include all files
-				suggestions = append(suggestions, suggestion)
-			}
-		}
-	}
-	
-	// Limit suggestions to avoid overwhelming the user
-	if len(suggestions) > 10 {
-		suggestions = suggestions[:10]
-	}
-	
-	return suggestions
-}
-
-// showVisualFuzzyFinder displays an fzf-like visual popup with suggestions
-func (ie *ImportExportModal) showVisualFuzzyFinder(query string, suggestions []string, fuzzyModal **tview.Modal, fuzzyList **tview.List) {
-	// Limit suggestions to show (like fzf)
-	maxSuggestions := 10
-	displaySuggestions := suggestions
-	if len(suggestions) > maxSuggestions {
-		displaySuggestions = suggestions[:maxSuggestions]
-	}
-	
-	// Create the text display similar to fzf
-	var displayText strings.Builder
-	displayText.WriteString(fmt.Sprintf("[white]> %s[::]\n\n", query))
-	
-	for i, suggestion := range displaySuggestions {
-		if i == 0 {
-			// Highlight the first (selected) item
-			displayText.WriteString(fmt.Sprintf("[black:darkblue]  %s  [::]\n", suggestion))
+		// Build fzf command based on import/export mode
+		var fzfCommand string
+		if ie.isImport {
+			// For import: show files with supported extensions
+			fzfCommand = fmt.Sprintf("find %s -type f \\( -name '*.yaml' -o -name '*.yml' -o -name '*.json' -o -name 'config' -o -name '*config*' \\) 2>/dev/null | fzf --height=100%% --border --info=inline --preview 'head -20 {}' --preview-window=right:50%% --prompt='Select config file: '", searchDir)
 		} else {
-			displayText.WriteString(fmt.Sprintf("  %s\n", suggestion))
+			// For export: show directories and let user type filename
+			fzfCommand = fmt.Sprintf("find %s -type d 2>/dev/null | fzf --height=100%% --border --info=inline --preview 'ls -la {}' --preview-window=right:50%% --prompt='Select directory: '", searchDir)
 		}
-	}
-	
-	// Add footer info like fzf
-	total := len(suggestions)
-	shown := len(displaySuggestions)
-	displayText.WriteString(fmt.Sprintf("\n[gray]  %d/%d[::]\n", shown, total))
-	
-	// Create or update the modal
-	if *fuzzyModal == nil {
-		modal := tview.NewModal()
-		modal.SetText(displayText.String())
-		modal.SetTitle("fzf - File Finder") 
-		modal.SetBackgroundColor(tcell.ColorBlack)
-		modal.SetBorder(true)
-		modal.SetBorderColor(tcell.ColorGray)
-		modal.AddButtons([]string{"Select", "Cancel"})
-		modal.SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-			if buttonLabel == "Select" && len(suggestions) > 0 {
-				ie.filePathField.SetText(suggestions[0])
-			}
-			ie.hideFuzzyFinder(modal)
-			*fuzzyModal = nil
+		
+		// Execute fzf and get result
+		result := ie.withFilter(fzfCommand, func(in io.WriteCloser) {
+			in.Close()
 		})
 		
-		*fuzzyModal = modal
-		
-		// Show the modal
-		if ie.app.modalManager != nil {
-			ie.app.modalManager.ShowModal(*fuzzyModal)
-		}
-	} else {
-		// Update existing modal
-		(*fuzzyModal).SetText(displayText.String())
-		(*fuzzyModal).SetTitle(fmt.Sprintf("fzf - File Finder (%d/%d)", shown, total))
-	}
-}
-
-// highlightMatches highlights matching characters in the suggestion similar to fzf
-func (ie *ImportExportModal) highlightMatches(text, pattern string) string {
-	if len(pattern) == 0 {
-		return text
-	}
-	
-	// Simple highlighting - make matched characters yellow like fzf
-	patternLower := strings.ToLower(pattern)
-	
-	result := text
-	for _, char := range patternLower {
-		charStr := string(char)
-		if idx := strings.Index(strings.ToLower(result), charStr); idx != -1 {
-			// Replace first occurrence with highlighted version
-			before := result[:idx]
-			after := result[idx+1:]
-			highlighted := fmt.Sprintf("[yellow]%c[white]", result[idx])
-			result = before + highlighted + after
-		}
-	}
-	
-	return result
-}
-
-// hideFuzzyFinder hides the visual fuzzy finder modal
-func (ie *ImportExportModal) hideFuzzyFinder(fuzzyModal *tview.Modal) {
-	if fuzzyModal != nil && ie.app.modalManager != nil {
-		ie.app.modalManager.HideModal()
-	}
-}
-
-// fuzzyMatch performs simple fuzzy matching
-func (ie *ImportExportModal) fuzzyMatch(text, pattern string) bool {
-	if pattern == "" {
-		return true
-	}
-	if text == "" {
-		return false
-	}
-	
-	// Simple fuzzy matching: all characters of pattern must appear in text in order
-	textIndex := 0
-	for _, patternChar := range pattern {
-		found := false
-		for textIndex < len(text) {
-			if rune(text[textIndex]) == patternChar {
-				found = true
-				textIndex++
-				break
+		// Process the result
+		if len(result) > 0 && result[0] != "" {
+			selectedPath := strings.TrimSpace(result[0])
+			if selectedPath != "" {
+				if !ie.isImport {
+					// For export, add a default filename
+					selectedPath = filepath.Join(selectedPath, "config.yaml")
+				}
+				
+				// Schedule update to the TUI after resume
+				ie.app.app.QueueUpdateDraw(func() {
+					ie.filePathField.SetText(selectedPath)
+					
+					// Auto-detect format for import
+					if ie.isImport {
+						format := ie.detectFileFormat(selectedPath)
+						ie.setFormatSelection(format)
+					}
+				})
 			}
-			textIndex++
 		}
-		if !found {
-			return false
-		}
-	}
-	return true
+	})
 }
 
-// createFormFields creates the form input fields
+
+// isFzfAvailable checks if fzf command is available in the system
+func (ie *ImportExportModal) isFzfAvailable() bool {
+	_, err := exec.LookPath("fzf")
+	return err == nil
+}
+
+// showFzfInstallationModal shows installation instructions for fzf
+func (ie *ImportExportModal) showFzfInstallationModal() {
+	// Create installation instructions
+	instructions := `[yellow::b]📦 fzf (Fuzzy Finder) Required[white::-]
+
+The Browse Files feature requires fzf to be installed on your system.
+
+[aqua::b]Installation Instructions:[white::-]
+
+[yellow]macOS (using Homebrew):[white]
+  brew install fzf
+
+[yellow]Linux (Ubuntu/Debian):[white]
+  sudo apt-get install fzf
+
+[yellow]Linux (CentOS/RHEL/Fedora):[white]
+  sudo dnf install fzf
+  # or: sudo yum install fzf
+
+[yellow]Using Git (all platforms):[white]
+  git clone --depth 1 https://github.com/junegunn/fzf.git ~/.fzf
+  ~/.fzf/install
+
+[yellow]Manual Download:[white]
+  Visit: https://github.com/junegunn/fzf/releases
+
+[lightgray]After installation, restart your terminal or run:[white]
+  source ~/.bashrc   # or ~/.zshrc`
+
+	// Create modal
+	modal := tview.NewModal()
+	modal.SetText(instructions)
+	modal.SetTitle(" 📦 Install fzf ")
+	modal.SetBackgroundColor(tcell.ColorBlack)
+	modal.SetBorder(true)
+	modal.SetBorderColor(tcell.ColorYellow)
+	modal.AddButtons([]string{"📂 Use File Browser", "❌ Cancel"})
+	modal.SetDoneFunc(func(buttonIndex int, buttonLabel string) {
+		if buttonLabel == "📂 Use File Browser" {
+			// Fall back to built-in file system browser
+			ie.showBuiltInFileSystemBrowser()
+		}
+		if ie.app.modalManager != nil {
+			ie.app.modalManager.HideModal()
+		}
+	})
+
+	// Show the modal
+	if ie.app.modalManager != nil {
+		ie.app.modalManager.ShowModal(modal)
+	}
+}
+
+// showBuiltInFileSystemBrowser shows the built-in file system browser as fallback
+func (ie *ImportExportModal) showBuiltInFileSystemBrowser() {
+	browser := NewFileSystemBrowser(ie.isImport, func(selectedPath string) {
+		if selectedPath != "" {
+			ie.filePathField.SetText(selectedPath)
+			// Auto-detect format based on file extension
+			if ie.isImport {
+				format := ie.detectFileFormat(selectedPath)
+				ie.setFormatSelection(format)
+			}
+		}
+	})
+	
+	browser.Show(ie.app)
+}
+
+// withFilter executes fzf command and returns selected results
+func (ie *ImportExportModal) withFilter(command string, input func(in io.WriteCloser)) []string {
+	shell := os.Getenv("SHELL")
+	if len(shell) == 0 {
+		shell = "sh"
+	}
+	
+	cmd := exec.Command(shell, "-c", command)
+	cmd.Stderr = os.Stderr
+	
+	in, err := cmd.StdinPipe()
+	if err != nil {
+		return []string{}
+	}
+	
+	go func() {
+		input(in)
+		in.Close()
+	}()
+	
+	result, err := cmd.Output()
+	if err != nil {
+		return []string{}
+	}
+	
+	lines := strings.Split(string(result), "\n")
+	// Filter out empty lines
+	var filteredLines []string
+	for _, line := range lines {
+		if strings.TrimSpace(line) != "" {
+			filteredLines = append(filteredLines, line)
+		}
+	}
+	
+	return filteredLines
+}
+
+
+// createFormFields creates the form input fields with professional styling
 func (ie *ImportExportModal) createFormFields() {
-	// File path field with fuzzy finder functionality
+	// File path field with real-time fzf dropdown - professional styling
 	ie.filePathField = tview.NewInputField()
 	ie.filePathField.SetLabel("").
-		SetPlaceholder("Enter file path...").
-		SetFieldWidth(50)
+		SetPlaceholder("Type file path or start typing to see fzf suggestions...").
+		SetFieldWidth(0).  // Use full available width
+		SetFieldBackgroundColor(tcell.ColorBlack).
+		SetFieldTextColor(tcell.ColorWhite)
 	
-	// Set up fuzzy finder functionality (this will set up the ChangedFunc internally)
-	ie.setupFuzzyFinder()
+	// Add real-time fzf dropdown functionality
+	ie.setupRealtimeFzfDropdown()
 	
-	// Format selection field
+	// Format selection field with professional styling
 	ie.formatField = tview.NewDropDown()
 	if ie.isImport {
 		ie.formatField.SetOptions([]string{"Auto-detect", "YAML", "JSON", "SSH Config"}, nil)
 	} else {
 		ie.formatField.SetOptions([]string{"YAML", "JSON"}, nil)
 	}
-	ie.formatField.SetCurrentOption(0)
+	ie.formatField.SetCurrentOption(0).
+		SetFieldBackgroundColor(tcell.ColorBlack).
+		SetFieldTextColor(tcell.ColorWhite)
 	
-	// Profile filter field (export only)
+	// Profile filter field (export only) with professional styling
 	if !ie.isImport {
 		ie.profileField = tview.NewDropDown()
 		profiles := ie.app.config.GetProfiles()
@@ -630,35 +481,227 @@ func (ie *ImportExportModal) createFormFields() {
 			options = append(options, profile.Name)
 		}
 		
-		ie.profileField.SetOptions(options, nil)
-		ie.profileField.SetCurrentOption(0)
+		ie.profileField.SetOptions(options, nil).
+			SetCurrentOption(0).
+			SetFieldBackgroundColor(tcell.ColorBlack).
+			SetFieldTextColor(tcell.ColorWhite)
+	}
+}
+
+// setupRealtimeFzfDropdown adds real-time fzf dropdown functionality to the file path field
+func (ie *ImportExportModal) setupRealtimeFzfDropdown() {
+	var suggestionsView *tview.TextView
+	var currentSuggestions []string
+	var selectedIndex int
+	var suggestionsVisible bool
+	
+	// Set up real-time change handler
+	ie.filePathField.SetChangedFunc(func(text string) {
+		// Only trigger fzf for meaningful input (1+ chars for testing, later can be 3+)
+		if len(strings.TrimSpace(text)) < 1 {
+			if suggestionsVisible {
+				ie.hideFzfDropdown()
+				suggestionsView = nil
+				currentSuggestions = nil
+				suggestionsVisible = false
+			}
+			return
+		}
+		
+		// Check if fzf is available
+		if !ie.isFzfAvailable() {
+			// Show message about fzf not being available
+			ie.progressText.SetText("[yellow]fzf not available - install fzf for file suggestions[white]")
+			return
+		}
+		
+		// Get fzf suggestions asynchronously
+		go func() {
+			newSuggestions := ie.getFzfSuggestions(text)
+			
+			// Update UI on main thread
+			ie.app.app.QueueUpdateDraw(func() {
+				if len(newSuggestions) > 0 {
+					currentSuggestions = newSuggestions
+					selectedIndex = 0
+					ie.showFzfDropdown(text, currentSuggestions, selectedIndex, &suggestionsView)
+					suggestionsVisible = true
+				} else {
+					// Show "no matches" message
+					ie.progressText.SetText(fmt.Sprintf("[yellow]fzf: no matches for '%s'[white]", text))
+					if suggestionsVisible {
+						currentSuggestions = nil
+						suggestionsVisible = false
+					}
+				}
+			})
+		}()
+	})
+	
+	// Set up key handling for dropdown navigation
+	ie.filePathField.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		// If suggestions are visible, handle navigation
+		if suggestionsVisible && len(currentSuggestions) > 0 {
+			switch event.Key() {
+			case tcell.KeyEscape:
+				// Hide suggestions
+				ie.hideFzfDropdown()
+				suggestionsView = nil
+				currentSuggestions = nil
+				suggestionsVisible = false
+				return nil
+			case tcell.KeyDown:
+				// Navigate down
+				if selectedIndex < len(currentSuggestions)-1 {
+					selectedIndex++
+					ie.showFzfDropdown(ie.filePathField.GetText(), currentSuggestions, selectedIndex, &suggestionsView)
+				}
+				return nil
+			case tcell.KeyUp:
+				// Navigate up
+				if selectedIndex > 0 {
+					selectedIndex--
+					ie.showFzfDropdown(ie.filePathField.GetText(), currentSuggestions, selectedIndex, &suggestionsView)
+				}
+				return nil
+			case tcell.KeyEnter, tcell.KeyTab:
+				// Select current suggestion
+				if len(currentSuggestions) > 0 && selectedIndex < len(currentSuggestions) {
+					selectedPath := currentSuggestions[selectedIndex]
+					ie.filePathField.SetText(selectedPath)
+					ie.hideFzfDropdown()
+					suggestionsView = nil
+					currentSuggestions = nil
+					suggestionsVisible = false
+					
+					// Auto-detect format for import
+					if ie.isImport {
+						format := ie.detectFileFormat(selectedPath)
+						ie.setFormatSelection(format)
+					}
+				}
+				return nil
+			}
+		}
+		
+		return event
+	})
+}
+
+// getFzfSuggestions gets file suggestions using fzf
+func (ie *ImportExportModal) getFzfSuggestions(query string) []string {
+	// Determine search directory - start from home directory
+	homeDir, err := os.UserHomeDir()
+	if err != nil {
+		homeDir = "/"
+	}
+	
+	// If query contains a path separator, use its directory
+	searchDir := homeDir
+	if strings.Contains(query, "/") {
+		queryDir := filepath.Dir(query)
+		if queryDir != "." && queryDir != query {
+			// Expand ~ to home directory
+			if strings.HasPrefix(queryDir, "~") {
+				queryDir = strings.Replace(queryDir, "~", homeDir, 1)
+			}
+			searchDir = queryDir
+		}
+	}
+	
+	// Build fzf command for suggestions
+	var fzfCommand string
+	if ie.isImport {
+		// For import: find config files and use fzf for fuzzy matching
+		// Search more broadly and let fzf do the filtering
+		fzfCommand = fmt.Sprintf("find %s -maxdepth 4 -type f \\( -name '*.yaml' -o -name '*.yml' -o -name '*.json' -o -name 'config' -o -name '*config*' -o -name '*.conf' \\) 2>/dev/null | fzf --filter='%s' | head -10", searchDir, filepath.Base(query))
+	} else {
+		// For export: find directories and files
+		fzfCommand = fmt.Sprintf("find %s -maxdepth 3 -type f -o -type d 2>/dev/null | fzf --filter='%s' | head -10", searchDir, filepath.Base(query))
+	}
+	
+	return ie.withFilter(fzfCommand, func(in io.WriteCloser) {
+		in.Close()
+	})
+}
+
+// showFzfDropdown displays fzf-style suggestions in a dropdown within the modal
+func (ie *ImportExportModal) showFzfDropdown(query string, suggestions []string, selectedIndex int, suggestionsView **tview.TextView) {
+	// This will be implemented by modifying the modal layout to include a suggestions area
+	// For now, we'll use a simple approach that shows suggestions in the progress text area
+	
+	// Limit suggestions displayed
+	maxShow := 6
+	showSuggestions := suggestions
+	if len(suggestions) > maxShow {
+		showSuggestions = suggestions[:maxShow]
+	}
+	
+	// Build suggestions text with fzf-like styling - compact format
+	var suggestionsText strings.Builder
+	suggestionsText.WriteString(fmt.Sprintf("[aqua::b]fzf:[white::-] %s\n", query))
+	
+	for i, suggestion := range showSuggestions {
+		// Truncate long paths for display
+		displayPath := suggestion
+		if len(displayPath) > 60 {
+			displayPath = "..." + displayPath[len(displayPath)-57:]
+		}
+		
+		if i == selectedIndex {
+			// Highlight selected item with fzf-style selection
+			suggestionsText.WriteString(fmt.Sprintf("[black:aqua]▶ %s[::]\n", displayPath))
+		} else {
+			suggestionsText.WriteString(fmt.Sprintf("[white]  %s[::]\n", displayPath))
+		}
+	}
+	
+	// Add compact footer
+	if len(suggestions) > maxShow {
+		suggestionsText.WriteString(fmt.Sprintf("[gray]... +%d more[::] ", len(suggestions)-maxShow))
+	}
+	suggestionsText.WriteString(fmt.Sprintf("[yellow]↑↓:nav Enter:select Esc:close[::] [gray]%d/%d[::]\n", selectedIndex+1, len(suggestions)))
+	
+	// Update the progress text area to show suggestions
+	if ie.progressText != nil {
+		ie.progressText.SetText(suggestionsText.String())
+	}
+}
+
+// hideFzfDropdown hides the fzf suggestions dropdown
+func (ie *ImportExportModal) hideFzfDropdown() {
+	// Clear the progress text area
+	if ie.progressText != nil {
+		ie.progressText.SetText("")
 	}
 }
 
 // setupKeyBindings configures keyboard navigation for the modal
 func (ie *ImportExportModal) setupKeyBindings(layout tview.Primitive) {
-	layout.(*tview.Flex).SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyEscape:
-			ie.handleCancel()
-			return nil
-		case tcell.KeyEnter:
-			// Handle Enter based on current focus
-			if ie.isImport {
-				ie.handleImport()
-			} else {
-				ie.handleExport()
+	if flexLayout, ok := layout.(*tview.Flex); ok {
+		flexLayout.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+			switch event.Key() {
+			case tcell.KeyEscape:
+				ie.handleCancel()
+				return nil
+			case tcell.KeyEnter:
+				// Handle Enter based on current focus
+				if ie.isImport {
+					ie.handleImport()
+				} else {
+					ie.handleExport()
+				}
+				return nil
+			case tcell.KeyTab:
+				// Tab navigation between fields
+				return event
+			case tcell.KeyBacktab:
+				// Shift+Tab navigation
+				return event
 			}
-			return nil
-		case tcell.KeyTab:
-			// Tab navigation between fields
 			return event
-		case tcell.KeyBacktab:
-			// Shift+Tab navigation
-			return event
-		}
-		return event
-	})
+		})
+	}
 }
 
 // handleImport processes the import operation
@@ -1257,8 +1300,8 @@ func (fb *FileSystemBrowser) loadDirectory() {
 			continue
 		}
 		
-		// Skip hidden files/directories
-		if strings.HasPrefix(entry.Name(), ".") && entry.Name() != ".." {
+		// Skip hidden files but keep directories (hidden directories can contain config files)
+		if strings.HasPrefix(entry.Name(), ".") && entry.Name() != ".." && !entry.IsDir() {
 			continue
 		}
 		
