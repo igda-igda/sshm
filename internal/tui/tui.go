@@ -531,13 +531,21 @@ func (t *TUIApp) connectToSelectedServer() {
 						// Refresh sessions to show the new one
 						t.refreshSessions()
 					}
-					t.app.SetRoot(t.layout, true)
-					t.app.SetFocus(t.layout)
+					if t.modalManager != nil {
+						t.modalManager.HideModal()
+					} else {
+						t.app.SetRoot(t.layout, true)
+						t.app.SetFocus(t.layout)
+					}
 				}).
 				SetBackgroundColor(tcell.ColorDarkGreen)
 			
-			t.app.SetRoot(successModal, true)
-			t.app.SetFocus(successModal)
+			if t.modalManager != nil {
+				t.modalManager.ShowModal(successModal)
+			} else {
+				t.app.SetRoot(successModal, true)
+				t.app.SetFocus(successModal)
+			}
 			
 			// Also refresh the session list in background
 			t.refreshSessions()
@@ -1853,13 +1861,21 @@ func (t *TUIApp) connectToCurrentProfile() {
 						// Refresh sessions to show the new one
 						t.refreshSessions()
 					}
-					t.app.SetRoot(t.layout, true)
-					t.app.SetFocus(t.layout)
+					if t.modalManager != nil {
+						t.modalManager.HideModal()
+					} else {
+						t.app.SetRoot(t.layout, true)
+						t.app.SetFocus(t.layout)
+					}
 				}).
 				SetBackgroundColor(tcell.ColorDarkGreen)
 			
-			t.app.SetRoot(successModal, true)
-			t.app.SetFocus(successModal)
+			if t.modalManager != nil {
+				t.modalManager.ShowModal(successModal)
+			} else {
+				t.app.SetRoot(successModal, true)
+				t.app.SetFocus(successModal)
+			}
 			
 			// Also refresh the session list in background
 			t.refreshSessions()
