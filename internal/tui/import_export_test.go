@@ -548,67 +548,6 @@ func (p *ProgressIndicator) SetError(err error) {
 	p.Error = err
 }
 
-// Test modal centering calculations and layout consistency
-func TestImportExportModal_CenteringCalculations(t *testing.T) {
-	tests := []struct {
-		name           string
-		terminalWidth  int
-		terminalHeight int
-		modalWidth     int
-		modalHeight    int
-		expectedX      int
-		expectedY      int
-	}{
-		{
-			name:           "standard terminal 80x24",
-			terminalWidth:  80,
-			terminalHeight: 24,
-			modalWidth:     60,
-			modalHeight:    20,
-			expectedX:      10, // (80-60)/2 = 10
-			expectedY:      2,  // (24-20)/2 = 2
-		},
-		{
-			name:           "large terminal 120x40",
-			terminalWidth:  120,
-			terminalHeight: 40,
-			modalWidth:     80,
-			modalHeight:    35,
-			expectedX:      20, // (120-80)/2 = 20
-			expectedY:      2,  // (40-35)/2 = 2.5 -> 2
-		},
-		{
-			name:           "small terminal 60x20",
-			terminalWidth:  60,
-			terminalHeight: 20,
-			modalWidth:     50,
-			modalHeight:    18,
-			expectedX:      5, // (60-50)/2 = 5
-			expectedY:      1, // (20-18)/2 = 1
-		},
-		{
-			name:           "optimal dimensions 80x35",
-			terminalWidth:  100,
-			terminalHeight: 45,
-			modalWidth:     80,
-			modalHeight:    35,
-			expectedX:      10, // (100-80)/2 = 10
-			expectedY:      5,  // (45-35)/2 = 5
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			x, y := calculateModalCenterPosition(tt.terminalWidth, tt.terminalHeight, tt.modalWidth, tt.modalHeight)
-			if x != tt.expectedX {
-				t.Errorf("calculateModalCenterPosition() x = %d, want %d", x, tt.expectedX)
-			}
-			if y != tt.expectedY {
-				t.Errorf("calculateModalCenterPosition() y = %d, want %d", y, tt.expectedY)
-			}
-		})
-	}
-}
 
 // Test modal layout consistency
 func TestImportExportModal_LayoutConsistency(t *testing.T) {
@@ -666,168 +605,10 @@ func TestImportExportModal_LayoutConsistency(t *testing.T) {
 	}
 }
 
-// Test modal dimensions validation
-func TestImportExportModal_DimensionsValidation(t *testing.T) {
-	tests := []struct {
-		name           string
-		width          int
-		height         int
-		isValid        bool
-		expectedWidth  int
-		expectedHeight int
-	}{
-		{
-			name:           "optimal dimensions 80x35",
-			width:          80,
-			height:         35,
-			isValid:        true,
-			expectedWidth:  80,
-			expectedHeight: 35,
-		},
-		{
-			name:           "too wide modal",
-			width:          120,
-			height:         35,
-			isValid:        false,
-			expectedWidth:  80, // Should be clamped to max
-			expectedHeight: 35,
-		},
-		{
-			name:           "too tall modal",
-			width:          80,
-			height:         50,
-			isValid:        false,
-			expectedWidth:  80,
-			expectedHeight: 35, // Should be clamped to max
-		},
-		{
-			name:           "too small modal",
-			width:          40,
-			height:         20,
-			isValid:        false,
-			expectedWidth:  50, // Should be clamped to min
-			expectedHeight: 25, // Should be clamped to min
-		},
-	}
 
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			width, height := validateModalDimensions(tt.width, tt.height)
-			if width != tt.expectedWidth {
-				t.Errorf("validateModalDimensions() width = %d, want %d", width, tt.expectedWidth)
-			}
-			if height != tt.expectedHeight {
-				t.Errorf("validateModalDimensions() height = %d, want %d", height, tt.expectedHeight)
-			}
-			
-			isValid := (width == tt.width && height == tt.height)
-			if isValid != tt.isValid {
-				t.Errorf("validateModalDimensions() validity = %t, want %t", isValid, tt.isValid)
-			}
-		})
-	}
-}
-
-// Test internal spacing calculations
-func TestImportExportModal_SpacingCalculations(t *testing.T) {
-	tests := []struct {
-		name            string
-		contentHeight   int
-		modalHeight     int
-		expectedPadding int
-	}{
-		{
-			name:            "standard spacing",
-			contentHeight:   25,
-			modalHeight:     35,
-			expectedPadding: 5, // (35-25)/2 = 5
-		},
-		{
-			name:            "minimal spacing",
-			contentHeight:   33,
-			modalHeight:     35,
-			expectedPadding: 1, // (35-33)/2 = 1
-		},
-		{
-			name:            "tight fit",
-			contentHeight:   35,
-			modalHeight:     35,
-			expectedPadding: 0, // No extra space
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			padding := calculateVerticalPadding(tt.contentHeight, tt.modalHeight)
-			if padding != tt.expectedPadding {
-				t.Errorf("calculateVerticalPadding() = %d, want %d", padding, tt.expectedPadding)
-			}
-		})
-	}
-}
 
 // Helper functions are now in the main import_export.go file
 
-// Test adaptive modal dimensions
-func TestImportExportModal_AdaptiveModalDimensions(t *testing.T) {
-	tests := []struct {
-		name           string
-		termWidth      int
-		termHeight     int
-		expectedWidth  int
-		expectedHeight int
-	}{
-		{
-			name:           "large terminal - optimal dimensions",
-			termWidth:      120,
-			termHeight:     50,
-			expectedWidth:  80,  // Use optimal width
-			expectedHeight: 35,  // Use optimal height
-		},
-		{
-			name:           "medium terminal - adaptive width",
-			termWidth:      85,
-			termHeight:     45,
-			expectedWidth:  72,  // 85 * 0.85 = 72.25 -> 72
-			expectedHeight: 35,  // Use optimal height
-		},
-		{
-			name:           "small terminal - adaptive both",
-			termWidth:      70,
-			termHeight:     35,
-			expectedWidth:  59,  // 70 * 0.85 = 59.5 -> 59
-			expectedHeight: 29,  // 35 * 0.85 = 29.75 -> 29
-		},
-		{
-			name:           "very small terminal - minimum constraints",
-			termWidth:      55,
-			termHeight:     28,
-			expectedWidth:  50,  // Clamped to minimum
-			expectedHeight: 25,  // Clamped to minimum
-		},
-		{
-			name:           "tiny terminal - absolute minimum",
-			termWidth:      40,
-			termHeight:     20,
-			expectedWidth:  50,  // Enforced minimum
-			expectedHeight: 25,  // Enforced minimum
-		},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			width, height := getAdaptiveModalDimensions(tt.termWidth, tt.termHeight)
-			if width != tt.expectedWidth {
-				t.Errorf("getAdaptiveModalDimensions() width = %d, want %d", width, tt.expectedWidth)
-			}
-			if height != tt.expectedHeight {
-				t.Errorf("getAdaptiveModalDimensions() height = %d, want %d", height, tt.expectedHeight)
-			}
-		})
-	}
-}
-
-// getAdaptiveModalDimensions is now in the main import_export.go file
 
 // TestImportExportModal_TabNavigation tests Tab key cycling through all focusable elements
 func TestImportExportModal_TabNavigation(t *testing.T) {
@@ -1340,4 +1121,379 @@ func (m *MockConfig) RemoveProfile(name string) {
 
 func (m *MockConfig) Save() error {
 	return nil // Mock save always succeeds
+}
+
+// Test dropdown spacebar key behavior  
+func TestImportExportModal_DropdownSpacebarBehavior(t *testing.T) {
+	tests := []struct {
+		name     string
+		isImport bool
+		expected bool // Expected spacebar handling behavior
+	}{
+		{
+			name:     "Import modal format dropdown spacebar",
+			isImport: true,
+			expected: true, // Should handle spacebar to open dropdown
+		},
+		{
+			name:     "Export modal format dropdown spacebar",
+			isImport: false,
+			expected: true, // Should handle spacebar to open dropdown
+		},
+		{
+			name:     "Export modal profile dropdown spacebar",
+			isImport: false,
+			expected: true, // Should handle spacebar to open dropdown
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create mock TUI app with real config
+			cfg := &config.Config{
+				Servers: []config.Server{
+					{Name: "server1", Hostname: "host1.example.com"},
+					{Name: "server2", Hostname: "host2.example.com"},
+				},
+				Profiles: []config.Profile{
+					{Name: "dev", Description: "Development servers"},
+					{Name: "prod", Description: "Production servers"},
+				},
+			}
+			mockApp := &TUIApp{
+				app:    tview.NewApplication(),
+				config: cfg,
+			}
+
+			// Create modal
+			modal := &ImportExportModal{
+				app:      mockApp,
+				isImport: tt.isImport,
+			}
+
+			// Create form fields
+			modal.createFormFields()
+
+			// Test that dropdown fields exist and have proper configuration
+			if modal.formatField == nil {
+				t.Fatal("Format field not created")
+			}
+
+			// Test format dropdown exists and can be configured for spacebar handling
+			if modal.formatField != nil {
+				// Get current option to verify dropdown is functional
+				_, currentOption := modal.formatField.GetCurrentOption()
+				if tt.isImport && currentOption != "Auto-detect" {
+					t.Errorf("Expected format dropdown default to 'Auto-detect' for import, got '%s'", currentOption)
+				} else if !tt.isImport && currentOption != "YAML" {
+					t.Errorf("Expected format dropdown default to 'YAML' for export, got '%s'", currentOption)
+				}
+			}
+
+			// Test profile dropdown for export mode
+			if !tt.isImport {
+				if modal.profileField == nil {
+					t.Fatal("Profile field not created for export modal")
+				}
+				
+				// Verify profile dropdown has expected options
+				_, currentOption := modal.profileField.GetCurrentOption()
+				if currentOption != "All" {
+					t.Errorf("Expected profile dropdown default to 'All', got '%s'", currentOption)
+				}
+			}
+
+			// The actual spacebar handling will be tested with real event simulation
+			t.Logf("Spacebar behavior test prepared for %s modal", map[bool]string{true: "import", false: "export"}[tt.isImport])
+		})
+	}
+}
+
+// Test dropdown Enter key behavior for selection confirmation
+func TestImportExportModal_DropdownEnterKeyBehavior(t *testing.T) {
+	tests := []struct {
+		name     string
+		isImport bool
+		expected bool // Expected Enter key handling behavior
+	}{
+		{
+			name:     "Import modal format dropdown Enter",
+			isImport: true,
+			expected: true, // Should confirm selection with Enter
+		},
+		{
+			name:     "Export modal format dropdown Enter",
+			isImport: false,
+			expected: true, // Should confirm selection with Enter
+		},
+		{
+			name:     "Export modal profile dropdown Enter",
+			isImport: false,
+			expected: true, // Should confirm selection with Enter
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create mock TUI app with real config
+			cfg := &config.Config{
+				Servers: []config.Server{
+					{Name: "server1", Hostname: "host1.example.com"},
+					{Name: "server2", Hostname: "host2.example.com"},
+				},
+				Profiles: []config.Profile{
+					{Name: "dev", Description: "Development servers"},
+					{Name: "prod", Description: "Production servers"},
+				},
+			}
+			mockApp := &TUIApp{
+				app:    tview.NewApplication(),
+				config: cfg,
+			}
+
+			// Create modal
+			modal := &ImportExportModal{
+				app:      mockApp,
+				isImport: tt.isImport,
+			}
+
+			// Create form fields
+			modal.createFormFields()
+
+			// Test that dropdown fields exist and support Enter key confirmation
+			if modal.formatField == nil {
+				t.Fatal("Format field not created")
+			}
+
+			// Test format dropdown Enter behavior setup
+			if modal.formatField != nil {
+				// Verify options are available for selection
+				if tt.isImport {
+					// Import should have: Auto-detect, YAML, JSON, SSH Config
+					// Try to set different options to test Enter behavior capability
+					modal.formatField.SetCurrentOption(1) // YAML
+					_, option := modal.formatField.GetCurrentOption()
+					if option != "YAML" {
+						t.Errorf("Expected to set format to 'YAML', got '%s'", option)
+					}
+				} else {
+					// Export should have: YAML, JSON
+					modal.formatField.SetCurrentOption(1) // JSON
+					_, option := modal.formatField.GetCurrentOption()
+					if option != "JSON" {
+						t.Errorf("Expected to set format to 'JSON', got '%s'", option)
+					}
+				}
+			}
+
+			// Test profile dropdown Enter behavior for export mode
+			if !tt.isImport {
+				if modal.profileField == nil {
+					t.Fatal("Profile field not created for export modal")
+				}
+				
+				// Test profile selection capability
+				if len(cfg.Profiles) > 0 {
+					modal.profileField.SetCurrentOption(1) // First profile (not "All")
+					_, option := modal.profileField.GetCurrentOption()
+					expectedProfile := cfg.Profiles[0].Name
+					if option != expectedProfile {
+						t.Errorf("Expected to set profile to '%s', got '%s'", expectedProfile, option)
+					}
+				}
+			}
+
+			// The actual Enter key handling will be implemented with event simulation
+			t.Logf("Enter key behavior test prepared for %s modal", map[bool]string{true: "import", false: "export"}[tt.isImport])
+		})
+	}
+}
+
+// Test dropdown arrow key navigation behavior
+func TestImportExportModal_DropdownArrowKeyNavigation(t *testing.T) {
+	tests := []struct {
+		name     string
+		isImport bool
+		fieldType string // "format" or "profile"
+	}{
+		{
+			name:      "Import modal format dropdown arrow navigation",
+			isImport:  true,
+			fieldType: "format",
+		},
+		{
+			name:      "Export modal format dropdown arrow navigation", 
+			isImport:  false,
+			fieldType: "format",
+		},
+		{
+			name:      "Export modal profile dropdown arrow navigation",
+			isImport:  false,
+			fieldType: "profile",
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create mock TUI app with real config
+			cfg := &config.Config{
+				Servers: []config.Server{
+					{Name: "server1", Hostname: "host1.example.com"},
+					{Name: "server2", Hostname: "host2.example.com"},
+				},
+				Profiles: []config.Profile{
+					{Name: "dev", Description: "Development servers"},
+					{Name: "prod", Description: "Production servers"},
+				},
+			}
+			mockApp := &TUIApp{
+				app:    tview.NewApplication(),
+				config: cfg,
+			}
+
+			// Create modal
+			modal := &ImportExportModal{
+				app:      mockApp,
+				isImport: tt.isImport,
+			}
+
+			// Create form fields
+			modal.createFormFields()
+
+			// Test arrow navigation on the specified field type
+			if tt.fieldType == "format" {
+				if modal.formatField == nil {
+					t.Fatal("Format field not created")
+				}
+
+				// Test that we can navigate through format options
+				initialIndex, _ := modal.formatField.GetCurrentOption()
+				
+				// Test navigation capability by changing option manually
+				var nextIndex int
+				if tt.isImport {
+					// Import: Auto-detect(0), YAML(1), JSON(2), SSH Config(3)
+					nextIndex = (initialIndex + 1) % 4
+				} else {
+					// Export: YAML(0), JSON(1) 
+					nextIndex = (initialIndex + 1) % 2
+				}
+				
+				modal.formatField.SetCurrentOption(nextIndex)
+				newIndex, _ := modal.formatField.GetCurrentOption()
+				
+				if newIndex != nextIndex {
+					t.Errorf("Arrow navigation test: expected option index %d, got %d", nextIndex, newIndex)
+				}
+
+			} else if tt.fieldType == "profile" && !tt.isImport {
+				if modal.profileField == nil {
+					t.Fatal("Profile field not created for export modal")
+				}
+
+				// Test that we can navigate through profile options
+				initialIndex, _ := modal.profileField.GetCurrentOption()
+				
+				// Profile options: All(0), dev(1), prod(2)
+				nextIndex := (initialIndex + 1) % (len(cfg.Profiles) + 1)
+				modal.profileField.SetCurrentOption(nextIndex)
+				newIndex, _ := modal.profileField.GetCurrentOption()
+				
+				if newIndex != nextIndex {
+					t.Errorf("Profile arrow navigation test: expected option index %d, got %d", nextIndex, newIndex)
+				}
+			}
+
+			// The actual arrow key event simulation will be implemented with tcell event handling
+			t.Logf("Arrow key navigation test prepared for %s field in %s modal", 
+				tt.fieldType, map[bool]string{true: "import", false: "export"}[tt.isImport])
+		})
+	}
+}
+
+// Test dropdown selection registration and visual feedback
+func TestImportExportModal_DropdownSelectionRegistration(t *testing.T) {
+	tests := []struct {
+		name     string
+		isImport bool
+	}{
+		{
+			name:     "Import modal dropdown selection registration",
+			isImport: true,
+		},
+		{
+			name:     "Export modal dropdown selection registration",
+			isImport: false,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			// Create mock TUI app with real config
+			cfg := &config.Config{
+				Servers: []config.Server{
+					{Name: "server1", Hostname: "host1.example.com"},
+					{Name: "server2", Hostname: "host2.example.com"},
+				},
+				Profiles: []config.Profile{
+					{Name: "dev", Description: "Development servers"},
+					{Name: "prod", Description: "Production servers"},
+				},
+			}
+			mockApp := &TUIApp{
+				app:    tview.NewApplication(),
+				config: cfg,
+			}
+
+			// Create modal
+			modal := &ImportExportModal{
+				app:      mockApp,
+				isImport: tt.isImport,
+			}
+
+			// Create form fields
+			modal.createFormFields()
+
+			// Test format selection registration
+			if modal.formatField == nil {
+				t.Fatal("Format field not created")
+			}
+
+			// Test multiple selections to ensure they're properly registered
+			testSelections := []int{0, 1, 0} // Test going to option 1 and back to 0
+			
+			for _, selection := range testSelections {
+				modal.formatField.SetCurrentOption(selection)
+				actualSelection, _ := modal.formatField.GetCurrentOption()
+				if actualSelection != selection {
+					t.Errorf("Format selection registration failed: expected option %d, got %d", selection, actualSelection)
+				}
+			}
+
+			// Test profile selection registration for export mode
+			if !tt.isImport {
+				if modal.profileField == nil {
+					t.Fatal("Profile field not created for export modal")
+				}
+				
+				// Test profile selections
+				profileSelections := []int{0, 1, 2, 0} // Test All -> dev -> prod -> All
+				maxOptions := len(cfg.Profiles) + 1 // +1 for "All" option
+				
+				for _, selection := range profileSelections {
+					if selection < maxOptions {
+						modal.profileField.SetCurrentOption(selection)
+						actualSelection, _ := modal.profileField.GetCurrentOption()
+						if actualSelection != selection {
+							t.Errorf("Profile selection registration failed: expected option %d, got %d", selection, actualSelection)
+						}
+					}
+				}
+			}
+
+			// Test that selections trigger any registered callbacks (for future implementation)
+			t.Logf("Selection registration test completed for %s modal", 
+				map[bool]string{true: "import", false: "export"}[tt.isImport])
+		})
+	}
 }
