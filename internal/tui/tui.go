@@ -46,6 +46,7 @@ type TUIApp struct {
 	stopChan             chan struct{}
 	refreshTimer         *time.Timer
 	currentFilter        string   // Current profile filter, empty means all servers
+	searchFilter         string   // Current search filter by server name, empty means no search
 	selectedRow          int      // Currently selected row (0 = header, 1+ = data rows)
 	profileTabs          []string // List of profile tab names including "All"
 	selectedProfileIndex int      // Currently selected profile tab index
@@ -279,9 +280,21 @@ func (t *TUIApp) setupKeyBindings() {
 			t.Stop()
 			return nil
 		case tcell.KeyEscape:
-			// Escape closes any active modal or does nothing if none
+			// Escape closes any active modal or clears search filter
 			if t.modalManager != nil && t.modalManager.IsModalActive() {
 				t.modalManager.HideModal()
+				return nil
+			}
+			// Clear search filter if active
+			if t.searchFilter != "" {
+				t.searchFilter = ""
+				t.refreshServerList()
+				// Get current server count from table (subtract 1 for header)
+				serverCount := t.serverList.GetRowCount() - 1
+				if serverCount < 0 {
+					serverCount = 0
+				}
+				t.updateStatusBar(serverCount)
 				return nil
 			}
 			return event
@@ -318,6 +331,9 @@ func (t *TUIApp) setupKeyBindings() {
 			return nil
 		case '?':
 			t.showHelp()
+			return nil
+		case '/':
+			t.showSearchInput()
 			return nil
 		case 'j', 'J':
 			t.handleNavigationDown()
@@ -700,7 +716,7 @@ func (t *TUIApp) updateFilterFromProfile() {
 	}
 }
 
-// refreshServerList loads server data into the table with optional profile filtering
+// refreshServerList loads server data into the table with optional profile filtering and search filtering
 func (t *TUIApp) refreshServerList() {
 	var servers []config.Server
 	
@@ -715,6 +731,18 @@ func (t *TUIApp) refreshServerList() {
 		}
 	} else {
 		servers = t.config.GetServers()
+	}
+	
+	// Apply search filter if set
+	if t.searchFilter != "" {
+		var searchFiltered []config.Server
+		searchLower := strings.ToLower(t.searchFilter)
+		for _, server := range servers {
+			if strings.Contains(strings.ToLower(server.Name), searchLower) {
+				searchFiltered = append(searchFiltered, server)
+			}
+		}
+		servers = searchFiltered
 	}
 	
 	// Clear existing data (except headers)
@@ -780,11 +808,16 @@ func (t *TUIApp) getServerProfiles(serverName string) []string {
 func (t *TUIApp) updateStatusBar(serverCount int) {
 	filterText := ""
 	if t.currentFilter != "" && t.currentFilter != "all" {
-		filterText = fmt.Sprintf(" | Filter: [aqua]%s[white]", t.currentFilter)
+		filterText = fmt.Sprintf(" | Profile: [aqua]%s[white]", t.currentFilter)
 	}
 	
-	statusText := fmt.Sprintf("[white]SSHM TUI - [yellow]%d[white] servers%s | Press [yellow]q[white] to quit, [yellow]?[white] for help", 
-		serverCount, filterText)
+	searchText := ""
+	if t.searchFilter != "" {
+		searchText = fmt.Sprintf(" | Search: [yellow]%s[white]", t.searchFilter)
+	}
+	
+	statusText := fmt.Sprintf("[white]SSHM TUI - [yellow]%d[white] servers%s%s | Press [yellow]q[white] to quit, [yellow]?[white] for help, [yellow]/[white] to search", 
+		serverCount, filterText, searchText)
 	t.statusBar.SetText(statusText)
 }
 
@@ -2269,5 +2302,61 @@ func (t *TUIApp) getAuthMethod(server config.Server) (ssh.AuthMethod, error) {
 		}
 		
 		return nil, fmt.Errorf("no valid authentication method found")
+	}
+}
+
+// showSearchInput shows a modal with input field for server name filtering
+func (t *TUIApp) showSearchInput() {
+	// Create input field
+	inputField := tview.NewInputField()
+	inputField.SetLabel("🔍 Search: ").
+		SetText(t.searchFilter). // Pre-populate with current search
+		SetFieldWidth(30).
+		SetPlaceholder("server name").
+		SetFieldTextColor(tcell.ColorWhite).
+		SetFieldBackgroundColor(tcell.ColorBlack).
+		SetLabelColor(tcell.ColorYellow)
+	
+	// Create a simple flex container with the input field  
+	flex := tview.NewFlex().SetDirection(tview.FlexRow).
+		AddItem(tview.NewTextView().SetText("🔍 Filter servers by name").SetTextAlign(tview.AlignCenter).SetTextColor(tcell.ColorYellow), 1, 0, false).
+		AddItem(tview.NewBox(), 1, 0, false). // Spacer
+		AddItem(inputField, 1, 0, true).
+		AddItem(tview.NewBox(), 1, 0, false). // Spacer
+		AddItem(tview.NewTextView().SetText("Press Enter to search, Esc to cancel").SetTextAlign(tview.AlignCenter).SetTextColor(tcell.ColorGray), 1, 0, false)
+	
+	// Set up input capture for the flex container
+	flex.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEnter:
+			// Enter key performs search
+			t.searchFilter = strings.TrimSpace(inputField.GetText())
+			t.refreshServerList()
+			// Get current server count from table (subtract 1 for header)
+			serverCount := t.serverList.GetRowCount() - 1
+			if serverCount < 0 {
+				serverCount = 0
+			}
+			t.updateStatusBar(serverCount)
+			if t.modalManager != nil {
+				t.modalManager.HideModal()
+			}
+			return nil
+		case tcell.KeyEscape:
+			// Escape cancels
+			if t.modalManager != nil {
+				t.modalManager.HideModal()
+			}
+			return nil
+		}
+		// Forward other keys to the input field
+		return event
+	})
+	
+	// Show as modal using modal manager
+	if t.modalManager != nil {
+		t.modalManager.ShowModal(flex)
+		// Focus on the input field
+		t.app.SetFocus(inputField)
 	}
 }
