@@ -130,76 +130,62 @@ func (ie *ImportExportModal) createCenteredModal(title, instruction, actionIcon 
 
 // createCenteredFieldsLayout creates a professional form fields layout with proper spacing
 func (ie *ImportExportModal) createCenteredFieldsLayout() *tview.Flex {
-	// Create file path section with full-width input
+	// Create file path label centered
 	filePathLabel := tview.NewTextView()
-	filePathLabel.SetText("[yellow::b]📁 File Path[white::-]").
-		SetDynamicColors(true).
-		SetTextAlign(tview.AlignLeft)
+	filePathLabel.SetText("File Path").
+		SetTextAlign(tview.AlignCenter)
 	
-	// Make input field span full width with padding
+	// Create file path input field centered with proper width
 	filePathInputRow := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(tview.NewBox(), 1, 0, false).        // Left padding
-		AddItem(ie.filePathField, 0, 1, true).       // Full-width input
-		AddItem(tview.NewBox(), 1, 0, false)         // Right padding
+		AddItem(tview.NewBox(), 0, 1, false).        // Left spacer
+		AddItem(ie.filePathField, 60, 0, true).      // Wider input field
+		AddItem(tview.NewBox(), 0, 1, false)         // Right spacer
 	
-	filePathSection := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(filePathLabel, 1, 0, false).
-		AddItem(tview.NewBox(), 1, 0, false).        // Spacing
-		AddItem(filePathInputRow, 1, 0, true)
-	
-	// Create bigger, centered browse button with more spacing
+	// Create browse button centered with icon
 	browseButton := tview.NewButton("📂 Browse Files")
 	browseButton.SetSelectedFunc(ie.showBuiltInFileSystemBrowser)
 	browseButton.SetBackgroundColor(tcell.ColorDarkBlue)
 	
 	browseButtonRow := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(tview.NewBox(), 0, 1, false).        // Left spacer
-		AddItem(browseButton, 24, 0, false).         // Bigger button
+		AddItem(browseButton, 26, 0, false).         // Fixed width button
 		AddItem(tview.NewBox(), 0, 1, false)         // Right spacer
 	
-	// Create format section with centered dropdown
+	// Create Format label (centered)
 	formatLabel := tview.NewTextView()
-	formatLabel.SetText("[yellow::b]📋 Format[white::-]").
-		SetDynamicColors(true).
-		SetTextAlign(tview.AlignLeft)
+	formatLabel.SetText("Format").
+		SetTextAlign(tview.AlignCenter)
 	
+	// Create Format dropdown (centered)
 	formatDropdownRow := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(tview.NewBox(), 0, 1, false).        // Left spacer
-		AddItem(ie.formatField, 20, 0, false).       // Centered dropdown
+		AddItem(ie.formatField, 0, 1, false).        // Format dropdown centered
 		AddItem(tview.NewBox(), 0, 1, false)         // Right spacer
 	
-	formatSection := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(formatLabel, 1, 0, false).
-		AddItem(tview.NewBox(), 1, 0, false).        // Spacing
-		AddItem(formatDropdownRow, 1, 0, false)
-	
-	// Create main fields layout with better spacing
+	// Create main fields layout - simple vertical stack
 	fieldsLayout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(filePathSection, 3, 0, true).       // File path with more space
-		AddItem(tview.NewBox(), 1, 0, false).       // Spacer
-		AddItem(browseButtonRow, 1, 0, false).      // Browse button
-		AddItem(tview.NewBox(), 2, 0, false).       // Larger spacer
-		AddItem(formatSection, 3, 0, false)         // Format section
+		AddItem(filePathLabel, 1, 0, false).         // 1. File Path label
+		AddItem(filePathInputRow, 1, 0, true).       // 2. File path input
+		AddItem(tview.NewBox(), 1, 0, false).        // 3. Spacer
+		AddItem(browseButtonRow, 1, 0, false).       // 4. Browse button  
+		AddItem(tview.NewBox(), 1, 0, false).        // 5. Spacer
+		AddItem(formatLabel, 1, 0, false).           // 6. Format label
+		AddItem(formatDropdownRow, 1, 0, false)      // 7. Format dropdown
 	
-	// Add profile section for export (if needed) with consistent styling
+	// Add profile section for export
 	if !ie.isImport {
 		profileLabel := tview.NewTextView()
-		profileLabel.SetText("[yellow::b]🏷️  Profile Filter[white::-]").
-			SetDynamicColors(true).
-			SetTextAlign(tview.AlignLeft)
+		profileLabel.SetText("Profile Filter").
+			SetTextAlign(tview.AlignCenter)
 		
 		profileDropdownRow := tview.NewFlex().SetDirection(tview.FlexColumn).
 			AddItem(tview.NewBox(), 0, 1, false).    // Left spacer
-			AddItem(ie.profileField, 20, 0, false).  // Centered dropdown
+			AddItem(ie.profileField, 0, 1, false).   // Profile dropdown centered
 			AddItem(tview.NewBox(), 0, 1, false)     // Right spacer
 		
-		profileSection := tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(profileLabel, 1, 0, false).
-			AddItem(tview.NewBox(), 1, 0, false).    // Spacing
-			AddItem(profileDropdownRow, 1, 0, false)
-		
-		fieldsLayout.AddItem(tview.NewBox(), 2, 0, false) // Larger spacer
-		fieldsLayout.AddItem(profileSection, 3, 0, false) // Profile section
+		fieldsLayout.AddItem(tview.NewBox(), 1, 0, false)          // 8. Spacer
+		fieldsLayout.AddItem(profileLabel, 1, 0, false)            // 9. Profile Filter label
+		fieldsLayout.AddItem(profileDropdownRow, 1, 0, false)      // 10. Profile dropdown
 	}
 	
 	return fieldsLayout
@@ -467,7 +453,7 @@ func (ie *ImportExportModal) createFormFields() {
 		ie.formatField.SetOptions([]string{"YAML", "JSON"}, nil)
 	}
 	ie.formatField.SetCurrentOption(0).
-		SetFieldBackgroundColor(tcell.ColorBlack).
+		SetFieldBackgroundColor(tcell.ColorDarkBlue).
 		SetFieldTextColor(tcell.ColorWhite)
 	
 	// Add format change handler for export mode to update file extension
@@ -490,7 +476,7 @@ func (ie *ImportExportModal) createFormFields() {
 		
 		ie.profileField.SetOptions(options, nil).
 			SetCurrentOption(0).
-			SetFieldBackgroundColor(tcell.ColorBlack).
+			SetFieldBackgroundColor(tcell.ColorDarkBlue).
 			SetFieldTextColor(tcell.ColorWhite)
 	}
 }
