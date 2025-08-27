@@ -124,7 +124,7 @@ func (ie *ImportExportModal) createCenteredModal(title, instruction, actionIcon 
 		ie.app.modalManager.ShowModal(centeredModal)
 	} else {
 		ie.app.app.SetRoot(centeredModal, true)
-		ie.app.app.SetFocus(fieldsLayout)
+		ie.app.app.SetFocus(centeredModal)
 	}
 }
 
@@ -470,6 +470,13 @@ func (ie *ImportExportModal) createFormFields() {
 		SetFieldBackgroundColor(tcell.ColorBlack).
 		SetFieldTextColor(tcell.ColorWhite)
 	
+	// Add format change handler for export mode to update file extension
+	if !ie.isImport {
+		ie.formatField.SetSelectedFunc(func(option string, optionIndex int) {
+			ie.updateFilePathExtension()
+		})
+	}
+	
 	// Profile filter field (export only) with professional styling
 	if !ie.isImport {
 		ie.profileField = tview.NewDropDown()
@@ -676,12 +683,66 @@ func (ie *ImportExportModal) hideFzfDropdown() {
 	}
 }
 
+// updateFilePathExtension updates the file path extension based on selected format
+func (ie *ImportExportModal) updateFilePathExtension() {
+	if ie.isImport || ie.filePathField == nil || ie.formatField == nil {
+		return
+	}
+	
+	currentPath := strings.TrimSpace(ie.filePathField.GetText())
+	if currentPath == "" {
+		return
+	}
+	
+	// Get selected format
+	_, formatText := ie.formatField.GetCurrentOption()
+	format := ie.normalizeFormat(formatText)
+	
+	// Determine new extension
+	var newExt string
+	switch format {
+	case "yaml":
+		newExt = ".yaml"
+	case "json":
+		newExt = ".json"
+	default:
+		newExt = ".yaml" // Default to yaml
+	}
+	
+	// Remove existing extension if present
+	currentExt := strings.ToLower(filepath.Ext(currentPath))
+	if currentExt == ".yaml" || currentExt == ".yml" || currentExt == ".json" {
+		currentPath = strings.TrimSuffix(currentPath, currentExt)
+	}
+	
+	// Add new extension
+	newPath := currentPath + newExt
+	ie.filePathField.SetText(newPath)
+}
+
 // setupKeyBindings configures keyboard navigation for the modal
 func (ie *ImportExportModal) setupKeyBindings(layout tview.Primitive) {
 	if flexLayout, ok := layout.(*tview.Flex); ok {
+		// Create list of focusable elements in tab order
+		focusableElements := []tview.Primitive{
+			ie.filePathField,
+			ie.formatField,
+		}
+		
+		// Add profile field for export mode
+		if !ie.isImport && ie.profileField != nil {
+			focusableElements = append(focusableElements, ie.profileField)
+		}
+		
+		currentFocus := 0
+		
 		flexLayout.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 			switch event.Key() {
 			case tcell.KeyEscape:
+				ie.handleCancel()
+				return nil
+			case tcell.KeyCtrlC:
+				// Ctrl+C also cancels
 				ie.handleCancel()
 				return nil
 			case tcell.KeyEnter:
@@ -693,14 +754,23 @@ func (ie *ImportExportModal) setupKeyBindings(layout tview.Primitive) {
 				}
 				return nil
 			case tcell.KeyTab:
-				// Tab navigation between fields
-				return event
+				// Tab navigation forward
+				currentFocus = (currentFocus + 1) % len(focusableElements)
+				ie.app.app.SetFocus(focusableElements[currentFocus])
+				return nil
 			case tcell.KeyBacktab:
-				// Shift+Tab navigation
-				return event
+				// Shift+Tab navigation backward
+				currentFocus = (currentFocus - 1 + len(focusableElements)) % len(focusableElements)
+				ie.app.app.SetFocus(focusableElements[currentFocus])
+				return nil
 			}
 			return event
 		})
+		
+		// Set initial focus to first element (file path field)
+		if len(focusableElements) > 0 {
+			ie.app.app.SetFocus(focusableElements[0])
+		}
 	}
 }
 
