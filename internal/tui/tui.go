@@ -3,6 +3,8 @@ package tui
 import (
 	"context"
 	"fmt"
+	"os"
+	"path/filepath"
 	"strconv"
 	"strings"
 	"sync"
@@ -10,7 +12,9 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"golang.org/x/crypto/ssh"
 	"sshm/internal/config"
+	sshmssh "sshm/internal/ssh"
 	"sshm/internal/tmux"
 )
 
@@ -48,6 +52,10 @@ type TUIApp struct {
 	sessions             []SessionInfo // Current session list
 	selectedSession      int      // Currently selected session (0 = header, 1+ = data rows)
 	focusedPanel         string   // Currently focused panel: "servers" or "sessions"
+	
+	// Connection status tracking
+	connectionStatus     map[string]string // Cache for connection status by server name
+	statusMutex          sync.RWMutex      // Protects connectionStatus map
 }
 
 // NewTUIApp creates a new TUI application instance
@@ -59,11 +67,12 @@ func NewTUIApp() (*TUIApp, error) {
 	}
 
 	tuiApp := &TUIApp{
-		app:          tview.NewApplication(),
-		config:       cfg,
-		stopChan:     make(chan struct{}),
-		tmuxManager:  tmux.NewManager(),
-		focusedPanel: "servers", // Default focus on servers panel
+		app:              tview.NewApplication(),
+		config:           cfg,
+		stopChan:         make(chan struct{}),
+		tmuxManager:      tmux.NewManager(),
+		focusedPanel:     "servers", // Default focus on servers panel
+		connectionStatus: make(map[string]string),
 	}
 
 	// Setup the UI layout
@@ -144,6 +153,9 @@ func (t *TUIApp) setupLayout() error {
 	t.updateProfileDisplay()
 	t.refreshSessions()
 	t.updatePanelHighlight()
+	
+	// Start background connection status checking
+	t.startConnectionStatusMonitoring()
 
 	return nil
 }
@@ -625,6 +637,16 @@ func (t *TUIApp) refreshData() {
 		// Sessions refresh failed, but don't show modal - just log/ignore
 		// since sessions may not always be available
 	}
+	
+	// Show refreshing indicator and trigger connection status update
+	t.showRefreshingStatus()
+	go func() {
+		t.updateAllConnectionStatus()
+		// Update status bar to show completion
+		t.app.QueueUpdateDraw(func() {
+			t.updateStatusBar(len(t.config.GetServers()))
+		})
+	}()
 }
 
 // switchToNextProfile switches to the next profile tab
@@ -714,9 +736,8 @@ func (t *TUIApp) refreshServerList() {
 			}
 		}
 		
-		// Determine status (placeholder for now, will be enhanced later)
-		status := "unknown"
-		statusColor := tcell.ColorGray
+		// Get cached connection status or default to "checking"
+		status, statusColor := t.getCachedConnectionStatus(server.Name)
 		
 		t.serverList.SetCell(row, 0, tview.NewTableCell(server.Name).SetTextColor(tcell.ColorWhite).SetAlign(tview.AlignLeft))
 		t.serverList.SetCell(row, 1, tview.NewTableCell(server.Hostname).SetTextColor(tcell.ColorLightBlue).SetAlign(tview.AlignLeft))
@@ -765,6 +786,24 @@ func (t *TUIApp) updateStatusBar(serverCount int) {
 	statusText := fmt.Sprintf("[white]SSHM TUI - [yellow]%d[white] servers%s | Press [yellow]q[white] to quit, [yellow]?[white] for help", 
 		serverCount, filterText)
 	t.statusBar.SetText(statusText)
+}
+
+// showRefreshingStatus temporarily shows a refreshing message in the status bar
+func (t *TUIApp) showRefreshingStatus() {
+	originalStatusText := t.statusBar.GetText(false)
+	
+	// Show refreshing message
+	refreshText := "[yellow]🔄 Refreshing connection status...[white]"
+	t.statusBar.SetText(refreshText)
+	
+	// Restore original status after a short delay
+	time.AfterFunc(2*time.Second, func() {
+		if t.running {
+			t.app.QueueUpdateDraw(func() {
+				t.statusBar.SetText(originalStatusText)
+			})
+		}
+	})
 }
 
 // showHelp displays context-sensitive help using the enhanced help system
@@ -2040,4 +2079,195 @@ func (t *TUIApp) SetCurrentFilter(filter string) {
 	t.mu.Lock()
 	defer t.mu.Unlock()
 	t.currentFilter = filter
+}
+
+// getCachedConnectionStatus returns the cached connection status for a server
+func (t *TUIApp) getCachedConnectionStatus(serverName string) (string, tcell.Color) {
+	t.statusMutex.RLock()
+	status, exists := t.connectionStatus[serverName]
+	t.statusMutex.RUnlock()
+	
+	if !exists {
+		return "checking", tcell.ColorYellow
+	}
+	
+	// Map status strings to colors
+	switch status {
+	case "online":
+		return status, tcell.ColorGreen
+	case "unreachable", "refused", "error":
+		return status, tcell.ColorRed
+	case "auth failed":
+		return status, tcell.ColorOrange
+	case "auth error":
+		return status, tcell.ColorRed
+	case "checking":
+		return status, tcell.ColorYellow
+	default:
+		return "unknown", tcell.ColorGray
+	}
+}
+
+// startConnectionStatusMonitoring starts background monitoring of connection status
+func (t *TUIApp) startConnectionStatusMonitoring() {
+	go func() {
+		// Initial status check for all servers
+		t.updateAllConnectionStatus()
+		
+		// Set up periodic updates every 30 seconds
+		ticker := time.NewTicker(30 * time.Second)
+		defer ticker.Stop()
+		
+		for {
+			select {
+			case <-t.stopChan:
+				return
+			case <-ticker.C:
+				if t.running {
+					t.updateAllConnectionStatus()
+				}
+			}
+		}
+	}()
+}
+
+// updateAllConnectionStatus updates connection status for all servers
+func (t *TUIApp) updateAllConnectionStatus() {
+	servers := t.config.GetServers()
+	
+	// First, mark all servers as "checking" to show activity
+	t.statusMutex.Lock()
+	for _, server := range servers {
+		t.connectionStatus[server.Name] = "checking"
+	}
+	t.statusMutex.Unlock()
+	
+	// Trigger immediate UI update to show "checking" status
+	if t.running && t.app != nil {
+		t.app.QueueUpdateDraw(func() {
+			t.refreshServerList()
+		})
+	}
+	
+	// Update connection status in parallel for better performance
+	var wg sync.WaitGroup
+	semaphore := make(chan struct{}, 5) // Limit to 5 concurrent checks
+	
+	for _, server := range servers {
+		wg.Add(1)
+		go func(srv config.Server) {
+			defer wg.Done()
+			semaphore <- struct{}{} // Acquire semaphore
+			defer func() { <-semaphore }() // Release semaphore
+			
+			status := t.checkSingleConnectionStatus(srv)
+			
+			// Update cache
+			t.statusMutex.Lock()
+			t.connectionStatus[srv.Name] = status
+			t.statusMutex.Unlock()
+			
+			// Trigger UI update
+			if t.running && t.app != nil {
+				t.app.QueueUpdateDraw(func() {
+					t.refreshServerList()
+				})
+			}
+		}(server)
+	}
+	
+	wg.Wait()
+}
+
+// checkSingleConnectionStatus checks the connection status of a single server
+func (t *TUIApp) checkSingleConnectionStatus(server config.Server) string {
+	// Create SSH client configuration
+	clientConfig := sshmssh.ClientConfig{
+		Hostname: server.Hostname,
+		Port:     server.Port,
+		Username: server.Username,
+		Timeout:  5 * time.Second, // 5 second timeout for connection test
+	}
+	
+	// Get authentication method based on server config
+	auth, err := t.getAuthMethod(server)
+	if err != nil {
+		return "auth error"
+	}
+	
+	// Test the connection
+	if err := sshmssh.TestConnection(clientConfig, auth); err != nil {
+		// Connection failed - determine specific error type
+		if strings.Contains(err.Error(), "timeout") || strings.Contains(err.Error(), "no route") {
+			return "unreachable"
+		} else if strings.Contains(err.Error(), "authentication") || strings.Contains(err.Error(), "permission denied") {
+			return "auth failed"
+		} else if strings.Contains(err.Error(), "connection refused") {
+			return "refused"
+		} else {
+			return "error"
+		}
+	}
+	
+	// Connection successful
+	return "online"
+}
+
+// getAuthMethod creates an SSH authentication method for the given server
+func (t *TUIApp) getAuthMethod(server config.Server) (ssh.AuthMethod, error) {
+	switch server.AuthType {
+	case "key":
+		if server.KeyPath == "" {
+			return nil, fmt.Errorf("key path is required for key authentication")
+		}
+		
+		// For TUI mode, we don't want interactive password prompts
+		// If the key is passphrase-protected, we'll need to handle this differently
+		// For now, try without passphrase and fallback to agent
+		auth, err := sshmssh.NewKeyAuth(server.KeyPath, "")
+		if err != nil {
+			// Try SSH agent as fallback
+			if agentAuth, agentErr := sshmssh.NewAgentAuth(); agentErr == nil {
+				return agentAuth, nil
+			}
+			return nil, fmt.Errorf("failed to load key and no SSH agent available: %w", err)
+		}
+		return auth, nil
+		
+	case "password":
+		// For TUI mode, we can't prompt for password interactively
+		// Return error - password auth needs to be handled differently in TUI
+		return nil, fmt.Errorf("password authentication not supported in status check")
+		
+	case "agent":
+		return sshmssh.NewAgentAuth()
+		
+	default:
+		// Try agent first, then look for default key
+		if agentAuth, err := sshmssh.NewAgentAuth(); err == nil {
+			return agentAuth, nil
+		}
+		
+		// Try default key locations
+		homeDir, err := os.UserHomeDir()
+		if err != nil {
+			return nil, fmt.Errorf("no authentication method available")
+		}
+		
+		defaultKeys := []string{
+			filepath.Join(homeDir, ".ssh", "id_rsa"),
+			filepath.Join(homeDir, ".ssh", "id_ed25519"),
+			filepath.Join(homeDir, ".ssh", "id_ecdsa"),
+		}
+		
+		for _, keyPath := range defaultKeys {
+			if _, err := os.Stat(keyPath); err == nil {
+				if auth, err := sshmssh.NewKeyAuth(keyPath, ""); err == nil {
+					return auth, nil
+				}
+			}
+		}
+		
+		return nil, fmt.Errorf("no valid authentication method found")
+	}
 }
