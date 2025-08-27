@@ -15,6 +15,67 @@ import (
 	"sshm/internal/config"
 )
 
+// FocusManager handles element cycling and focus management for modals
+type FocusManager struct {
+	elements        []tview.Primitive
+	currentFocus    int
+	app             *tview.Application
+}
+
+// NewFocusManager creates a new focus manager for managing element navigation
+func NewFocusManager(app *tview.Application) *FocusManager {
+	return &FocusManager{
+		elements:     make([]tview.Primitive, 0),
+		currentFocus: 0,
+		app:          app,
+	}
+}
+
+// AddElement adds an element to the focus cycle in the specified order
+func (fm *FocusManager) AddElement(element tview.Primitive) {
+	fm.elements = append(fm.elements, element)
+}
+
+// SetElements sets all focusable elements at once
+func (fm *FocusManager) SetElements(elements []tview.Primitive) {
+	fm.elements = elements
+	fm.currentFocus = 0
+}
+
+// FocusNext moves focus to the next element (Tab behavior)
+func (fm *FocusManager) FocusNext() {
+	if len(fm.elements) == 0 {
+		return
+	}
+	fm.currentFocus = (fm.currentFocus + 1) % len(fm.elements)
+	fm.app.SetFocus(fm.elements[fm.currentFocus])
+}
+
+// FocusPrevious moves focus to the previous element (Shift+Tab behavior)
+func (fm *FocusManager) FocusPrevious() {
+	if len(fm.elements) == 0 {
+		return
+	}
+	fm.currentFocus = (fm.currentFocus - 1 + len(fm.elements)) % len(fm.elements)
+	fm.app.SetFocus(fm.elements[fm.currentFocus])
+}
+
+// FocusFirst sets focus to the first element (initial focus)
+func (fm *FocusManager) FocusFirst() {
+	if len(fm.elements) > 0 {
+		fm.currentFocus = 0
+		fm.app.SetFocus(fm.elements[0])
+	}
+}
+
+// GetCurrentElement returns the currently focused element
+func (fm *FocusManager) GetCurrentElement() tview.Primitive {
+	if fm.currentFocus >= 0 && fm.currentFocus < len(fm.elements) {
+		return fm.elements[fm.currentFocus]
+	}
+	return nil
+}
+
 // ImportExportModal represents the import/export interface modal
 type ImportExportModal struct {
 	modal            *tview.Modal
@@ -23,8 +84,12 @@ type ImportExportModal struct {
 	filePathField    *tview.InputField
 	formatField      *tview.DropDown
 	profileField     *tview.DropDown
+	browseButton     *tview.Button
+	actionButton     *tview.Button
+	cancelButton     *tview.Button
 	progressText     *tview.TextView
 	onComplete       func(success bool, message string)
+	focusManager     *FocusManager
 	// progressIndicator *ProgressIndicator // Removed for now
 	app              *TUIApp
 }
@@ -60,6 +125,9 @@ func (ie *ImportExportModal) show() {
 		actionIcon = "📤"
 	}
 
+	// Initialize focus manager
+	ie.focusManager = NewFocusManager(ie.app.app)
+
 	// Create centered professional modal layout
 	ie.createCenteredModal(title, instruction, actionIcon)
 }
@@ -88,15 +156,18 @@ func (ie *ImportExportModal) createCenteredModal(title, instruction, actionIcon 
 		SetText("").
 		SetBorder(false)
 	
-	// Create main content layout - professional with optimal spacing
+	// Setup focus management with all focusable elements in correct tab order
+	ie.setupFocusManager()
+	
+	// Create main content layout with professional spacing and proportions
 	contentLayout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(headerText, 2, 0, false).              // More space for 2-line header
-		AddItem(tview.NewBox(), 1, 0, false).          // Spacing after header
-		AddItem(fieldsLayout, 0, 1, true).             // Main content area
-		AddItem(tview.NewBox(), 1, 0, false).          // Spacing before buttons
-		AddItem(buttonsLayout, 1, 0, false).           // Button row
+		AddItem(headerText, 3, 0, false).              // Header with proper breathing room
+		AddItem(tview.NewBox(), 1, 0, false).          // Consistent spacing after header
+		AddItem(fieldsLayout, 0, 1, true).             // Main content area (flexible)
+		AddItem(tview.NewBox(), 2, 0, false).          // Larger spacing before buttons
+		AddItem(buttonsLayout, 1, 0, false).           // Button row (compact)
 		AddItem(tview.NewBox(), 1, 0, false).          // Spacing after buttons
-		AddItem(ie.progressText, 10, 0, false)         // Generous space for fzf suggestions
+		AddItem(ie.progressText, 12, 0, false)         // Progress/fzf area with optimal height
 	
 	// Create border with professional styling
 	border := tview.NewFlex()
@@ -106,15 +177,34 @@ func (ie *ImportExportModal) createCenteredModal(title, instruction, actionIcon 
 		SetTitleColor(tcell.ColorAqua)
 	border.AddItem(contentLayout, 0, 1, true)
 	
-	// Center the modal in screen - create centering flex containers with bigger size for fzf
+	// Get terminal dimensions
+	termWidth, termHeight := getTerminalSize()
+	
+	// Get adaptive modal dimensions that respond to terminal size
+	modalWidth, modalHeight := getAdaptiveModalDimensions(termWidth, termHeight)
+	
+	// Calculate precise center position
+	leftPadding, topPadding := calculateModalCenterPosition(termWidth, termHeight, modalWidth, modalHeight)
+	rightPadding := termWidth - modalWidth - leftPadding
+	bottomPadding := termHeight - modalHeight - topPadding
+	
+	// Ensure padding values are non-negative
+	if rightPadding < 0 {
+		rightPadding = 0
+	}
+	if bottomPadding < 0 {
+		bottomPadding = 0
+	}
+	
+	// Center the modal in screen using precise mathematical centering
 	centeredModal := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(tview.NewBox(), 0, 1, false).  // Left padding
+		AddItem(tview.NewBox(), leftPadding, 0, false).  // Precise left padding
 		AddItem(tview.NewFlex().SetDirection(tview.FlexRow).
-			AddItem(tview.NewBox(), 0, 1, false). // Top padding
-			AddItem(border, 35, 0, true).         // Even taller modal for better spacing
-			AddItem(tview.NewBox(), 0, 1, false), // Bottom padding
-			80, 0, true).                         // Wider modal for better content space
-		AddItem(tview.NewBox(), 0, 1, false)   // Right padding
+			AddItem(tview.NewBox(), topPadding, 0, false).    // Precise top padding
+			AddItem(border, modalHeight, 0, true).            // Fixed modal height (35)
+			AddItem(tview.NewBox(), bottomPadding, 0, false), // Precise bottom padding
+			modalWidth, 0, true).                             // Fixed modal width (80)
+		AddItem(tview.NewBox(), rightPadding, 0, false)   // Precise right padding
 	
 	// Set up key bindings
 	ie.setupKeyBindings(centeredModal)
@@ -141,14 +231,14 @@ func (ie *ImportExportModal) createCenteredFieldsLayout() *tview.Flex {
 		AddItem(ie.filePathField, 60, 0, true).      // Wider input field
 		AddItem(tview.NewBox(), 0, 1, false)         // Right spacer
 	
-	// Create browse button centered with icon
-	browseButton := tview.NewButton("📂 Browse Files")
-	browseButton.SetSelectedFunc(ie.showBuiltInFileSystemBrowser)
-	browseButton.SetBackgroundColor(tcell.ColorDarkBlue)
+	// Create browse button centered with icon and store as field
+	ie.browseButton = tview.NewButton("📂 Browse Files")
+	ie.browseButton.SetSelectedFunc(ie.showBuiltInFileSystemBrowser)
+	ie.browseButton.SetBackgroundColor(tcell.ColorDarkBlue)
 	
 	browseButtonRow := tview.NewFlex().SetDirection(tview.FlexColumn).
 		AddItem(tview.NewBox(), 0, 1, false).        // Left spacer
-		AddItem(browseButton, 26, 0, false).         // Fixed width button
+		AddItem(ie.browseButton, 26, 0, false).      // Fixed width button
 		AddItem(tview.NewBox(), 0, 1, false)         // Right spacer
 	
 	// Create Format label (centered)
@@ -162,15 +252,17 @@ func (ie *ImportExportModal) createCenteredFieldsLayout() *tview.Flex {
 		AddItem(ie.formatField, 0, 1, false).        // Format dropdown centered
 		AddItem(tview.NewBox(), 0, 1, false)         // Right spacer
 	
-	// Create main fields layout - simple vertical stack
+	// Create main fields layout with improved professional spacing
 	fieldsLayout := tview.NewFlex().SetDirection(tview.FlexRow).
-		AddItem(filePathLabel, 1, 0, false).         // 1. File Path label
-		AddItem(filePathInputRow, 1, 0, true).       // 2. File path input
-		AddItem(tview.NewBox(), 1, 0, false).        // 3. Spacer
-		AddItem(browseButtonRow, 1, 0, false).       // 4. Browse button  
-		AddItem(tview.NewBox(), 1, 0, false).        // 5. Spacer
-		AddItem(formatLabel, 1, 0, false).           // 6. Format label
-		AddItem(formatDropdownRow, 1, 0, false)      // 7. Format dropdown
+		AddItem(tview.NewBox(), 1, 0, false).        // 1. Top padding
+		AddItem(filePathLabel, 1, 0, false).         // 2. File Path label
+		AddItem(filePathInputRow, 3, 0, true).       // 3. File path input (taller for better visibility)
+		AddItem(tview.NewBox(), 1, 0, false).        // 4. Spacer
+		AddItem(browseButtonRow, 1, 0, false).       // 5. Browse button  
+		AddItem(tview.NewBox(), 2, 0, false).        // 6. Larger spacer for visual separation
+		AddItem(formatLabel, 1, 0, false).           // 7. Format label
+		AddItem(formatDropdownRow, 1, 0, false).     // 8. Format dropdown
+		AddItem(tview.NewBox(), 1, 0, false)         // 9. Section spacer
 	
 	// Add profile section for export
 	if !ie.isImport {
@@ -183,9 +275,10 @@ func (ie *ImportExportModal) createCenteredFieldsLayout() *tview.Flex {
 			AddItem(ie.profileField, 0, 1, false).   // Profile dropdown centered
 			AddItem(tview.NewBox(), 0, 1, false)     // Right spacer
 		
-		fieldsLayout.AddItem(tview.NewBox(), 1, 0, false)          // 8. Spacer
-		fieldsLayout.AddItem(profileLabel, 1, 0, false)            // 9. Profile Filter label
-		fieldsLayout.AddItem(profileDropdownRow, 1, 0, false)      // 10. Profile dropdown
+		fieldsLayout.AddItem(tview.NewBox(), 1, 0, false)          // 10. Spacer
+		fieldsLayout.AddItem(profileLabel, 1, 0, false)            // 11. Profile Filter label
+		fieldsLayout.AddItem(profileDropdownRow, 1, 0, false)      // 12. Profile dropdown
+		fieldsLayout.AddItem(tview.NewBox(), 1, 0, false)          // 13. Bottom section padding
 	}
 	
 	return fieldsLayout
@@ -194,31 +287,51 @@ func (ie *ImportExportModal) createCenteredFieldsLayout() *tview.Flex {
 
 // createCompactButtonsLayout creates professional action buttons with better spacing
 func (ie *ImportExportModal) createCompactButtonsLayout() *tview.Flex {
-	// Create action button with improved styling
-	var actionButton *tview.Button
+	// Create action button with improved styling and store as field
 	if ie.isImport {
-		actionButton = tview.NewButton("📥 Import Configuration")
-		actionButton.SetSelectedFunc(ie.handleImport)
+		ie.actionButton = tview.NewButton("📥 Import Configuration")
+		ie.actionButton.SetSelectedFunc(ie.handleImport)
 	} else {
-		actionButton = tview.NewButton("📤 Export Configuration")
-		actionButton.SetSelectedFunc(ie.handleExport)
+		ie.actionButton = tview.NewButton("📤 Export Configuration")
+		ie.actionButton.SetSelectedFunc(ie.handleExport)
 	}
-	actionButton.SetBackgroundColor(tcell.ColorDarkGreen)
+	ie.actionButton.SetBackgroundColor(tcell.ColorDarkGreen)
 	
-	// Create cancel button with improved styling
-	cancelButton := tview.NewButton("❌ Cancel")
-	cancelButton.SetSelectedFunc(ie.handleCancel)
-	cancelButton.SetBackgroundColor(tcell.ColorDarkRed)
+	// Create cancel button with improved styling and store as field
+	ie.cancelButton = tview.NewButton("❌ Cancel")
+	ie.cancelButton.SetSelectedFunc(ie.handleCancel)
+	ie.cancelButton.SetBackgroundColor(tcell.ColorDarkRed)
 	
-	// Create professional button layout with better spacing
+	// Create professional button layout with improved spacing and alignment
 	buttonLayout := tview.NewFlex().SetDirection(tview.FlexColumn).
-		AddItem(tview.NewBox(), 0, 1, false).     // Spacer
-		AddItem(actionButton, 24, 0, false).      // Wider action button
-		AddItem(tview.NewBox(), 4, 0, false).     // Larger spacer between buttons
-		AddItem(cancelButton, 14, 0, false).      // Cancel button
-		AddItem(tview.NewBox(), 0, 1, false)      // Spacer
+		AddItem(tview.NewBox(), 0, 2, false).     // Left flexible spacer (larger weight)
+		AddItem(ie.actionButton, 26, 0, false).   // Wider action button for better touch target
+		AddItem(tview.NewBox(), 6, 0, false).     // Fixed spacer between buttons (wider for better separation)
+		AddItem(ie.cancelButton, 16, 0, false).   // Wider cancel button for consistency
+		AddItem(tview.NewBox(), 0, 2, false)      // Right flexible spacer (larger weight)
 	
 	return buttonLayout
+}
+
+// setupFocusManager configures the focus manager with all focusable elements in proper tab order
+func (ie *ImportExportModal) setupFocusManager() {
+	// File path → browse button → format dropdown → profile dropdown (export only) → action button → cancel button
+	focusableElements := []tview.Primitive{
+		ie.filePathField,
+		ie.browseButton,
+		ie.formatField,
+	}
+	
+	// Add profile field for export mode
+	if !ie.isImport && ie.profileField != nil {
+		focusableElements = append(focusableElements, ie.profileField)
+	}
+	
+	// Add action buttons
+	focusableElements = append(focusableElements, ie.actionButton, ie.cancelButton)
+	
+	// Set all elements in the focus manager
+	ie.focusManager.SetElements(focusableElements)
 }
 
 
@@ -706,22 +819,9 @@ func (ie *ImportExportModal) updateFilePathExtension() {
 	ie.filePathField.SetText(newPath)
 }
 
-// setupKeyBindings configures keyboard navigation for the modal
+// setupKeyBindings configures keyboard navigation for the modal using the focus manager
 func (ie *ImportExportModal) setupKeyBindings(layout tview.Primitive) {
 	if flexLayout, ok := layout.(*tview.Flex); ok {
-		// Create list of focusable elements in tab order
-		focusableElements := []tview.Primitive{
-			ie.filePathField,
-			ie.formatField,
-		}
-		
-		// Add profile field for export mode
-		if !ie.isImport && ie.profileField != nil {
-			focusableElements = append(focusableElements, ie.profileField)
-		}
-		
-		currentFocus := 0
-		
 		flexLayout.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
 			switch event.Key() {
 			case tcell.KeyEscape:
@@ -732,31 +832,38 @@ func (ie *ImportExportModal) setupKeyBindings(layout tview.Primitive) {
 				ie.handleCancel()
 				return nil
 			case tcell.KeyEnter:
-				// Handle Enter based on current focus
-				if ie.isImport {
-					ie.handleImport()
-				} else {
-					ie.handleExport()
+				// Handle Enter based on current focus element
+				currentElement := ie.focusManager.GetCurrentElement()
+				if currentElement == ie.actionButton {
+					// Enter on action button executes the action
+					if ie.isImport {
+						ie.handleImport()
+					} else {
+						ie.handleExport()
+					}
+				} else if currentElement == ie.cancelButton {
+					// Enter on cancel button cancels
+					ie.handleCancel()
+				} else if currentElement == ie.browseButton {
+					// Enter on browse button opens file browser
+					ie.showBuiltInFileSystemBrowser()
 				}
-				return nil
+				// For other elements (inputs, dropdowns), let tview handle Enter
+				return event
 			case tcell.KeyTab:
-				// Tab navigation forward
-				currentFocus = (currentFocus + 1) % len(focusableElements)
-				ie.app.app.SetFocus(focusableElements[currentFocus])
+				// Tab navigation forward using focus manager
+				ie.focusManager.FocusNext()
 				return nil
 			case tcell.KeyBacktab:
-				// Shift+Tab navigation backward
-				currentFocus = (currentFocus - 1 + len(focusableElements)) % len(focusableElements)
-				ie.app.app.SetFocus(focusableElements[currentFocus])
+				// Shift+Tab navigation backward using focus manager
+				ie.focusManager.FocusPrevious()
 				return nil
 			}
 			return event
 		})
 		
-		// Set initial focus to first element (file path field)
-		if len(focusableElements) > 0 {
-			ie.app.app.SetFocus(focusableElements[0])
-		}
+		// Set initial focus using focus manager
+		ie.focusManager.FocusFirst()
 	}
 }
 
@@ -1534,4 +1641,115 @@ func (fb *FileSystemBrowser) selectCurrentItem(app *TUIApp) {
 			}
 		}
 	}
+}
+
+// Helper functions for modal centering and layout
+
+// calculateModalCenterPosition calculates the precise center position for a modal
+func calculateModalCenterPosition(terminalWidth, terminalHeight, modalWidth, modalHeight int) (int, int) {
+	x := (terminalWidth - modalWidth) / 2
+	y := (terminalHeight - modalHeight) / 2
+	
+	// Ensure non-negative positions
+	if x < 0 {
+		x = 0
+	}
+	if y < 0 {
+		y = 0
+	}
+	
+	return x, y
+}
+
+// validateModalDimensions validates and adjusts modal dimensions to optimal ranges
+func validateModalDimensions(width, height int) (int, int) {
+	const (
+		minWidth  = 50
+		maxWidth  = 80
+		minHeight = 25
+		maxHeight = 35
+	)
+	
+	// Clamp width to valid range
+	if width < minWidth {
+		width = minWidth
+	} else if width > maxWidth {
+		width = maxWidth
+	}
+	
+	// Clamp height to valid range
+	if height < minHeight {
+		height = minHeight
+	} else if height > maxHeight {
+		height = maxHeight
+	}
+	
+	return width, height
+}
+
+// calculateVerticalPadding calculates vertical padding for content centering
+func calculateVerticalPadding(contentHeight, modalHeight int) int {
+	padding := (modalHeight - contentHeight) / 2
+	if padding < 0 {
+		padding = 0
+	}
+	return padding
+}
+
+// getTerminalSize returns the current terminal dimensions with fallback to reasonable defaults
+func getTerminalSize() (int, int) {
+	// Try to get terminal size from environment variables first
+	// This provides a more responsive approach
+	termWidth := 100  // Default width
+	termHeight := 40  // Default height
+	
+	// In a real tview application, we would access this via the app's screen:
+	// if ie.app != nil && ie.app.app != nil {
+	//     screen := ie.app.app.GetScreen()
+	//     if screen != nil {
+	//         termWidth, termHeight = screen.Size()
+	//     }
+	// }
+	
+	// Ensure minimum viable terminal size
+	if termWidth < 60 {
+		termWidth = 60
+	}
+	if termHeight < 30 {
+		termHeight = 30
+	}
+	
+	return termWidth, termHeight
+}
+
+// getAdaptiveModalDimensions returns modal dimensions adapted to terminal size
+func getAdaptiveModalDimensions(termWidth, termHeight int) (int, int) {
+	// Start with optimal dimensions
+	modalWidth := 80
+	modalHeight := 35
+	
+	// Adapt to smaller terminals while maintaining usability
+	if termWidth < 90 {
+		modalWidth = int(float64(termWidth) * 0.85) // Use 85% of terminal width
+		if modalWidth < 50 {
+			modalWidth = 50 // Minimum usable width
+		}
+	}
+	
+	if termHeight < 40 {
+		modalHeight = int(float64(termHeight) * 0.85) // Use 85% of terminal height
+		if modalHeight < 25 {
+			modalHeight = 25 // Minimum usable height
+		}
+	}
+	
+	// Ensure we don't exceed the optimal maximum
+	if modalWidth > 80 {
+		modalWidth = 80
+	}
+	if modalHeight > 35 {
+		modalHeight = 35
+	}
+	
+	return modalWidth, modalHeight
 }
