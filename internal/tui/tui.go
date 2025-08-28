@@ -14,6 +14,7 @@ import (
 	"github.com/rivo/tview"
 	"golang.org/x/crypto/ssh"
 	"sshm/internal/config"
+	"sshm/internal/connection"
 	sshmssh "sshm/internal/ssh"
 	"sshm/internal/tmux"
 )
@@ -28,17 +29,18 @@ type SessionInfo struct {
 
 // TUIApp represents the main TUI application
 type TUIApp struct {
-	app              *tview.Application
-	layout           *tview.Flex
-	serverList       *tview.Table
-	profileNavigator *tview.TextView
-	sessionPanel     *tview.Table
-	statusBar        *tview.TextView
-	config           *config.Config
-	tmuxManager      *tmux.Manager
-	modalManager     *ModalManager
-	sessionHandler   *SessionReturnHandler
-	helpSystem       *HelpSystem
+	app               *tview.Application
+	layout            *tview.Flex
+	serverList        *tview.Table
+	profileNavigator  *tview.TextView
+	sessionPanel      *tview.Table
+	statusBar         *tview.TextView
+	config            *config.Config
+	tmuxManager       *tmux.Manager
+	connectionManager *connection.Manager
+	modalManager      *ModalManager
+	sessionHandler    *SessionReturnHandler
+	helpSystem        *HelpSystem
 	
 	// Application state
 	running              bool
@@ -67,13 +69,20 @@ func NewTUIApp() (*TUIApp, error) {
 		return nil, fmt.Errorf("failed to load configuration: %w", err)
 	}
 
+	// Initialize connection manager with history tracking
+	connectionManager, err := connection.NewManager()
+	if err != nil {
+		return nil, fmt.Errorf("failed to initialize connection manager: %w", err)
+	}
+
 	tuiApp := &TUIApp{
-		app:              tview.NewApplication(),
-		config:           cfg,
-		stopChan:         make(chan struct{}),
-		tmuxManager:      tmux.NewManager(),
-		focusedPanel:     "servers", // Default focus on servers panel
-		connectionStatus: make(map[string]string),
+		app:               tview.NewApplication(),
+		config:            cfg,
+		stopChan:          make(chan struct{}),
+		tmuxManager:       tmux.NewManager(),
+		connectionManager: connectionManager,
+		focusedPanel:      "servers", // Default focus on servers panel
+		connectionStatus:  make(map[string]string),
 	}
 
 	// Setup the UI layout
@@ -516,24 +525,17 @@ func (t *TUIApp) connectToSelectedServer() {
 	}
 	
 	// Check if tmux is available
-	if !t.tmuxManager.IsAvailable() {
+	if !t.connectionManager.IsAvailable() {
 		t.showErrorModal("tmux is not available on this system. Please install tmux to use sshm.")
-		return
-	}
-	
-	// Build SSH command based on server configuration
-	sshCommand, err := t.buildSSHCommand(*server)
-	if err != nil {
-		t.showErrorModal(fmt.Sprintf("Failed to build SSH command: %s", err.Error()))
 		return
 	}
 	
 	// Show connecting modal
 	t.showConnectingModal(serverName)
 	
-	// Create tmux session in background and stay in TUI
+	// Create tmux session with history tracking in background and stay in TUI
 	go func() {
-		sessionName, wasExisting, err := t.tmuxManager.ConnectToServer(server.Name, sshCommand)
+		sessionName, wasExisting, err := t.connectionManager.ConnectToServer(*server)
 		if err != nil {
 			t.app.QueueUpdateDraw(func() {
 				t.showErrorModal(fmt.Sprintf("Failed to create tmux session: %s", err.Error()))
@@ -2367,7 +2369,7 @@ func (t *TUIApp) showSearchInput() {
 // showHistoryDashboard displays the history dashboard modal
 func (t *TUIApp) showHistoryDashboard() {
 	// Create history dashboard
-	dashboard, err := NewHistoryDashboard(t.app)
+	dashboard, err := NewHistoryDashboard(t.app, t)
 	if err != nil {
 		t.showErrorModal(fmt.Sprintf("Failed to load history dashboard: %s", err.Error()))
 		return
@@ -2379,31 +2381,10 @@ func (t *TUIApp) showHistoryDashboard() {
 		SetTitle(" Connection History Dashboard ").
 		SetBorderColor(tcell.ColorYellow)
 
-	// Set up input capture for the dashboard to handle close keys
-	dashboardLayout.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyEscape:
-			// Return to main TUI
-			dashboard.Close()
-			t.app.SetRoot(t.layout, true)
-			t.app.SetFocus(t.layout)
-			return nil
-		}
-		
-		// Handle character keys
-		switch event.Rune() {
-		case 'q', 'Q':
-			// Return to main TUI
-			dashboard.Close()
-			t.app.SetRoot(t.layout, true)
-			t.app.SetFocus(t.layout)
-			return nil
-		}
-		
-		// Let dashboard handle other keys
-		return event
-	})
-
+	// Disable global input capture while dashboard is active
+	// This prevents the main TUI from intercepting key events
+	t.app.SetInputCapture(nil)
+	
 	// Show the dashboard
 	t.app.SetRoot(dashboardLayout, true)
 	t.app.SetFocus(dashboardLayout)

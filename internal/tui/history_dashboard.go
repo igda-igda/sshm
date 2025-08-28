@@ -8,6 +8,7 @@ import (
 
 	"github.com/gdamore/tcell/v2"
 	"github.com/rivo/tview"
+	"sshm/internal/config"
 	"sshm/internal/connection"
 	"sshm/internal/history"
 )
@@ -21,6 +22,8 @@ type HistoryDashboard struct {
 	filterPanel      *tview.TextView
 	statusBar        *tview.TextView
 	manager          *connection.Manager
+	config           *config.Config
+	parentTUI        *TUIApp // Reference to parent for closing
 	
 	// State management
 	historyEntries   []history.ConnectionHistoryEntry
@@ -41,16 +44,25 @@ type HistoryDashboard struct {
 }
 
 // NewHistoryDashboard creates a new history dashboard
-func NewHistoryDashboard(app *tview.Application) (*HistoryDashboard, error) {
+func NewHistoryDashboard(app *tview.Application, parentTUI *TUIApp) (*HistoryDashboard, error) {
 	// Create connection manager to access history
 	manager, err := connection.NewManager()
 	if err != nil {
 		return nil, fmt.Errorf("failed to initialize connection manager: %w", err)
 	}
+	
+	// Load config to get available profiles and servers
+	cfg, err := config.Load()
+	if err != nil {
+		// Don't fail if config can't be loaded, just proceed without it
+		cfg = nil
+	}
 
 	dashboard := &HistoryDashboard{
 		app:          app,
 		manager:      manager,
+		config:       cfg,
+		parentTUI:    parentTUI,
 		limitFilter:  20,          // Default limit
 		selectedRow:  1,           // Start at first data row
 		focusedPanel: "history",   // Default focus on history
@@ -139,17 +151,20 @@ func (hd *HistoryDashboard) setupKeyBindings() {
 			hd.navigateDown()
 			return nil
 		case tcell.KeyEscape:
-			// Return nil to let parent handle (close dashboard)
-			return event
+			// Close dashboard and return to main TUI
+			hd.closeDashboard()
+			return nil
 		}
 
 		// Handle character keys
 		switch event.Rune() {
 		case 'q', 'Q':
-			// Return event to let parent handle (close dashboard)
-			return event
+			// Close dashboard and return to main TUI
+			hd.closeDashboard()
+			return nil
 		case 'r', 'R':
-			// Refresh data
+			// Refresh data with visual feedback
+			hd.showRefreshIndicator()
 			hd.refreshData()
 			return nil
 		case 't', 'T':
@@ -167,6 +182,14 @@ func (hd *HistoryDashboard) setupKeyBindings() {
 		case 'h', 'H':
 			// Show help
 			hd.showHelp()
+			return nil
+		case 'j':
+			// Vim-style down navigation
+			hd.navigateDown()
+			return nil
+		case 'k':
+			// Vim-style up navigation
+			hd.navigateUp()
 			return nil
 		case '1':
 			// Filter by success status
@@ -574,30 +597,62 @@ func (hd *HistoryDashboard) clearFilters() {
 func (hd *HistoryDashboard) showFilterModal() {
 	// Create form for filter settings
 	form := tview.NewForm()
-	form.SetBorder(true).SetTitle(" Set Filters ").SetTitleAlign(tview.AlignCenter)
+	form.SetBorder(true).
+		SetTitle(" Set Filters ").
+		SetTitleAlign(tview.AlignCenter)
 
-	// Add form fields with current values
-	form.AddInputField("Server", hd.serverFilter, 20, nil, nil)
-	form.AddInputField("Profile", hd.profileFilter, 20, nil, nil)
-	form.AddDropDown("Status", []string{"", "success", "failed", "timeout", "cancelled"}, 0, nil)
-	form.AddInputField("Days back", strconv.Itoa(hd.daysFilter), 10, nil, nil)
-	form.AddInputField("Limit", strconv.Itoa(hd.limitFilter), 10, nil, nil)
+	// Get available servers and profiles from history
+	serverOptions := hd.getAvailableServers()
+	profileOptions := hd.getAvailableProfiles()
 
-	// Set current status filter selection
-	statusOptions := []string{"", "success", "failed", "timeout", "cancelled"}
-	for i, status := range statusOptions {
-		if status == hd.statusFilter {
-			form.GetFormItem(2).(*tview.DropDown).SetCurrentOption(i)
+	// Add server dropdown
+	serverIndex := 0
+	for i, server := range serverOptions {
+		if server == hd.serverFilter {
+			serverIndex = i
 			break
 		}
 	}
+	form.AddDropDown("Server", serverOptions, serverIndex, func(option string, optionIndex int) {
+		hd.serverFilter = option
+	})
+
+	// Add profile dropdown  
+	profileIndex := 0
+	for i, profile := range profileOptions {
+		if profile == hd.profileFilter {
+			profileIndex = i
+			break
+		}
+	}
+	form.AddDropDown("Profile", profileOptions, profileIndex, func(option string, optionIndex int) {
+		hd.profileFilter = option
+	})
+
+	// Add status dropdown
+	statusOptions := []string{"", "success", "failed", "timeout", "cancelled"}
+	statusIndex := 0
+	for i, status := range statusOptions {
+		if status == hd.statusFilter {
+			statusIndex = i
+			break
+		}
+	}
+	form.AddDropDown("Status", statusOptions, statusIndex, func(option string, optionIndex int) {
+		hd.statusFilter = option
+	})
+
+	// Add numeric input fields
+	form.AddInputField("Days back", strconv.Itoa(hd.daysFilter), 10, nil, nil)
+	form.AddInputField("Limit", strconv.Itoa(hd.limitFilter), 10, nil, nil)
 
 	form.AddButton("Apply", func() {
-		// Get form values
-		hd.serverFilter = form.GetFormItem(0).(*tview.InputField).GetText()
-		hd.profileFilter = form.GetFormItem(1).(*tview.InputField).GetText()
+		// Get form values from dropdowns and input fields
+		_, hd.serverFilter = form.GetFormItem(0).(*tview.DropDown).GetCurrentOption()
+		_, hd.profileFilter = form.GetFormItem(1).(*tview.DropDown).GetCurrentOption()
 		_, hd.statusFilter = form.GetFormItem(2).(*tview.DropDown).GetCurrentOption()
 		
+		// Parse numeric input fields
 		if days, err := strconv.Atoi(form.GetFormItem(3).(*tview.InputField).GetText()); err == nil {
 			hd.daysFilter = days
 		}
@@ -615,41 +670,72 @@ func (hd *HistoryDashboard) showFilterModal() {
 		hd.app.SetRoot(hd.layout, true)
 	})
 
-	// Show the form
+	// Add input capture for escape key and enhance dropdown navigation
+	form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEscape:
+			// Close form without applying
+			hd.app.SetRoot(hd.layout, true)
+			return nil
+		case tcell.KeyEnter:
+			// Let the form handle Enter for dropdowns and buttons
+			return event
+		case tcell.KeyTab:
+			// Let the form handle Tab navigation
+			return event
+		}
+		
+		// For space key on dropdowns, let the form handle it
+		if event.Rune() == ' ' {
+			return event
+		}
+		
+		// Forward all other events to form for proper navigation
+		return event
+	})
+
+	// Show the form and set focus
 	hd.app.SetRoot(form, true)
+	hd.app.SetFocus(form)
 }
 
 // showHelp shows the help modal for the history dashboard
 func (hd *HistoryDashboard) showHelp() {
-	helpText := `[aqua::b]History Dashboard Help[::-]
+	helpText := fmt.Sprintf(`[yellow::b]📊 SSHM Help - History Dashboard 📊[::-]
 
-[yellow::b]⚡ Navigation:[white::-]
-  [lime]↑/↓[white]          Navigate history entries
-  [lime]Enter[white]        (Reserved for future use)
+[white::b]🧭 Navigation:[white::-]
+[yellow]↑/↓, j/k[white]: Move selection up/down in history list
+[yellow]t[white]: Toggle between History and Statistics view
+[yellow]r[white]: Refresh data from database
 
-[yellow::b]🔍 Filtering:[white::-]  
-  [lime]f[white]            Set custom filters
-  [lime]c[white]            Clear all filters
-  [lime]1[white]            Show only successful connections
-  [lime]2[white]            Show only failed connections
-  [lime]3[white]            Show only timeout connections
-  [lime]0[white]            Clear status filter
+[white::b]🔍 Filtering:[white::-]
+[yellow]f[white]: Open custom filters form
+[yellow]c[white]: Clear all active filters
+[yellow]1[white]: Show only successful connections
+[yellow]2[white]: Show only failed connections
+[yellow]3[white]: Show only timeout connections
+[yellow]0[white]: Clear status filter (show all)
 
-[yellow::b]📊 Views:[white::-]
-  [lime]t[white]            Toggle between History and Statistics view
-  [lime]r[white]            Refresh data
+[white::b]⚙️  Dashboard Actions:[white::-]
+[yellow]h[white]: Show/hide this help
+[yellow]q[white]: Return to main SSHM interface
+[yellow]Escape[white]: Return to main SSHM interface
 
-[yellow::b]🌐 General:[white::-]
-  [lime]q/Esc[white]        Close dashboard
-  [lime]h[white]            Show this help
+[white::b]📊 Current Context:[white::-]
+Total Entries: [aqua]%d[white] 📋
+Recent Activity: [aqua]%d connections (24h)[white] 🔗
+View Mode: [aqua]%s[white] 👁️
 
-[green::b]💡 Tips:[white::-]
-• History shows recent connection attempts with status, timing, and details
-• Statistics view shows aggregated data and success rates
-• Use filters to focus on specific servers, profiles, or time periods
-• Quick filters (1,2,3,0) provide rapid status-based filtering
+[green::b]💡 Pro Tips:[white::-]
+[green]•[white] [yellow]History view[white] shows individual connection attempts with timing
+[green]•[white] [yellow]Statistics view[white] shows aggregated success rates and totals
+[green]•[white] Use [yellow]f[white] for advanced filtering by server, profile, or time
+[green]•[white] Quick filters [yellow]1,2,3,0[white] provide rapid status-based filtering
 
-[gray]Press [lime]Enter[white] or [lime]Escape[white] to close help[gray]`
+[lime]Press [white]?[lime] or [white]Enter[lime] or [white]Escape[white] to close • [lime]Dashboard Help`,
+		len(hd.historyEntries),
+		hd.getTotalRecentActivity(),
+		hd.getCurrentViewMode())
 
 	modal := tview.NewModal().
 		SetText(helpText).
@@ -682,4 +768,90 @@ func (hd *HistoryDashboard) Close() {
 	if hd.manager != nil {
 		hd.manager.Close()
 	}
+}
+
+// getTotalRecentActivity returns the total recent activity count
+func (hd *HistoryDashboard) getTotalRecentActivity() int {
+	total := 0
+	for _, count := range hd.recentActivity {
+		total += count
+	}
+	return total
+}
+
+// getCurrentViewMode returns the current view mode as a string
+func (hd *HistoryDashboard) getCurrentViewMode() string {
+	if hd.showingStats {
+		return "Statistics"
+	}
+	return "History"
+}
+
+// getAvailableServers returns a list of unique servers from history plus "All" option
+func (hd *HistoryDashboard) getAvailableServers() []string {
+	serverSet := make(map[string]bool)
+	servers := []string{""}  // Start with empty option (all servers)
+	
+	// Get unique servers from current history entries
+	for _, entry := range hd.historyEntries {
+		if entry.ServerName != "" && !serverSet[entry.ServerName] {
+			serverSet[entry.ServerName] = true
+			servers = append(servers, entry.ServerName)
+		}
+	}
+	
+	return servers
+}
+
+// getAvailableProfiles returns a list of unique profiles from history plus "All" option  
+func (hd *HistoryDashboard) getAvailableProfiles() []string {
+	profileSet := make(map[string]bool)
+	profiles := []string{""}  // Start with empty option (all profiles)
+	
+	// Get unique profiles from current history entries
+	for _, entry := range hd.historyEntries {
+		if entry.ProfileName != "" && !profileSet[entry.ProfileName] {
+			profileSet[entry.ProfileName] = true
+			profiles = append(profiles, entry.ProfileName)
+		}
+	}
+	
+	// Also get profiles from configuration if available
+	if hd.config != nil {
+		for _, profile := range hd.config.Profiles {
+			if profile.Name != "" && !profileSet[profile.Name] {
+				profileSet[profile.Name] = true
+				profiles = append(profiles, profile.Name)
+			}
+		}
+	}
+	
+	return profiles
+}
+
+// closeDashboard closes the dashboard and returns to main TUI
+func (hd *HistoryDashboard) closeDashboard() {
+	hd.Close()
+	// Return to parent TUI
+	if hd.parentTUI != nil {
+		hd.app.SetRoot(hd.parentTUI.layout, true)
+		hd.app.SetFocus(hd.parentTUI.layout)
+		// Restore the global input capture for the main TUI
+		hd.parentTUI.setupKeyBindings()
+	}
+}
+
+// showRefreshIndicator shows a brief refresh indicator
+func (hd *HistoryDashboard) showRefreshIndicator() {
+	// Update status bar to show refreshing
+	originalText := hd.statusBar.GetText(false)
+	hd.statusBar.SetText("[yellow]🔄 Refreshing...").SetTextColor(tcell.ColorYellow)
+	
+	// Reset after a brief moment
+	go func() {
+		time.Sleep(500 * time.Millisecond)
+		hd.app.QueueUpdateDraw(func() {
+			hd.statusBar.SetText(originalText).SetTextColor(tcell.ColorWhite)
+		})
+	}()
 }
