@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"strconv"
 	"strings"
 )
 
@@ -315,6 +316,157 @@ func (m *Manager) SendKeysToWindow(windowTarget, command string) error {
 		return fmt.Errorf("failed to send keys to window '%s': %w", windowTarget, err)
 	}
 	return nil
+}
+
+// GetSessionInfo returns detailed information about a session
+func (m *Manager) GetSessionInfo(sessionName string) (map[string]string, error) {
+	if !m.SessionExists(sessionName) {
+		return nil, fmt.Errorf("session '%s' does not exist", sessionName)
+	}
+
+	// Use tmux display-message to get session information
+	format := "#{session_name} #{session_windows} #{session_attached} #{session_many_attached} #{session_activity} #{session_created}"
+	cmd := execCommand("tmux", "display-message", "-p", "-t", sessionName, "-F", format)
+	output, err := cmd.Output()
+	if err != nil {
+		return nil, fmt.Errorf("failed to get session info for '%s': %w", sessionName, err)
+	}
+
+	fields := strings.Fields(strings.TrimSpace(string(output)))
+	if len(fields) < 6 {
+		return nil, fmt.Errorf("unexpected session info format for '%s'", sessionName)
+	}
+
+	info := map[string]string{
+		"name":           fields[0],
+		"windows":        fields[1],
+		"attached":       fields[2],
+		"many_attached":  fields[3],
+		"activity":       fields[4],
+		"created":        fields[5],
+	}
+
+	return info, nil
+}
+
+// ListSessionsDetailed returns detailed information about all sessions
+func (m *Manager) ListSessionsDetailed() ([]map[string]string, error) {
+	sessions, err := m.ListSessions()
+	if err != nil {
+		return nil, err
+	}
+
+	var detailedSessions []map[string]string
+	for _, sessionName := range sessions {
+		info, err := m.GetSessionInfo(sessionName)
+		if err != nil {
+			// Skip sessions we can't get info for
+			continue
+		}
+		detailedSessions = append(detailedSessions, info)
+	}
+
+	return detailedSessions, nil
+}
+
+// GetWindowCount returns the number of windows in a session
+func (m *Manager) GetWindowCount(sessionName string) (int, error) {
+	if !m.SessionExists(sessionName) {
+		return 0, fmt.Errorf("session '%s' does not exist", sessionName)
+	}
+
+	cmd := execCommand("tmux", "list-windows", "-t", sessionName, "-F", "#{window_index}")
+	output, err := cmd.Output()
+	if err != nil {
+		return 0, fmt.Errorf("failed to count windows for session '%s': %w", sessionName, err)
+	}
+
+	windowCount := len(strings.Split(strings.TrimSpace(string(output)), "\n"))
+	if strings.TrimSpace(string(output)) == "" {
+		windowCount = 0
+	}
+
+	return windowCount, nil
+}
+
+// IsSessionAttached checks if a session has any attached clients
+func (m *Manager) IsSessionAttached(sessionName string) (bool, error) {
+	info, err := m.GetSessionInfo(sessionName)
+	if err != nil {
+		return false, err
+	}
+
+	return info["attached"] == "1", nil
+}
+
+// GetSessionActivity returns the last activity time for a session
+func (m *Manager) GetSessionActivity(sessionName string) (string, error) {
+	info, err := m.GetSessionInfo(sessionName)
+	if err != nil {
+		return "", err
+	}
+
+	return info["activity"], nil
+}
+
+// RefreshSessionInfo provides updated session information for TUI integration
+func (m *Manager) RefreshSessionInfo() ([]SessionInfo, error) {
+	detailedSessions, err := m.ListSessionsDetailed()
+	if err != nil {
+		return nil, err
+	}
+
+	var sessionInfos []SessionInfo
+	for _, sessionData := range detailedSessions {
+		info := SessionInfo{
+			Name:         sessionData["name"],
+			Windows:      0, // Will be set below
+			Status:       "active", // Default
+			LastActivity: "unknown",
+		}
+
+		// Parse window count
+		if windowStr, ok := sessionData["windows"]; ok {
+			if windows, err := strconv.Atoi(windowStr); err == nil {
+				info.Windows = windows
+			}
+		}
+
+		// Determine status
+		if sessionData["attached"] == "1" {
+			if sessionData["many_attached"] == "1" {
+				info.Status = "multi-attached"
+			} else {
+				info.Status = "attached"
+			}
+		} else {
+			info.Status = "detached"
+		}
+
+		// Parse activity time (this would need more sophisticated parsing in real implementation)
+		if activity, ok := sessionData["activity"]; ok && activity != "" {
+			info.LastActivity = m.formatActivityTime(activity)
+		}
+
+		sessionInfos = append(sessionInfos, info)
+	}
+
+	return sessionInfos, nil
+}
+
+// formatActivityTime formats tmux activity timestamp to human-readable format
+func (m *Manager) formatActivityTime(timestamp string) string {
+	// This is a simplified implementation
+	// In a real implementation, you'd parse the tmux timestamp and format it
+	return "recent" // Placeholder
+}
+
+// SessionInfo represents session information for TUI integration
+type SessionInfo struct {
+	Name         string
+	Windows      int
+	Status       string
+	LastActivity string
 }
 
 // contains checks if a string slice contains a specific value

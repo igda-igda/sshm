@@ -807,6 +807,149 @@ func TestKillSession(t *testing.T) {
   }
 }
 
+// TestTmuxManagerIntegration tests enhanced tmux manager integration functionality
+func TestTmuxManagerIntegration_GetSessionInfo(t *testing.T) {
+	manager := NewManager()
+
+	// Test GetSessionInfo with non-existent session
+	_, err := manager.GetSessionInfo("non-existent-session")
+	if err == nil {
+		t.Error("Expected error for non-existent session")
+	}
+
+	// In a real environment with tmux available, we could test actual session info
+	// For now, we test that the method handles errors gracefully
+}
+
+// TestTmuxManagerIntegration_ListSessionsDetailed tests detailed session listing
+func TestTmuxManagerIntegration_ListSessionsDetailed(t *testing.T) {
+	manager := NewManager()
+
+	// Test detailed session listing
+	detailedSessions, err := manager.ListSessionsDetailed()
+	if err != nil {
+		t.Logf("List sessions detailed returned error (expected without tmux): %v", err)
+	} else {
+		t.Logf("Found %d detailed sessions", len(detailedSessions))
+	}
+}
+
+// TestTmuxManagerIntegration_GetWindowCount tests window counting functionality
+func TestTmuxManagerIntegration_GetWindowCount(t *testing.T) {
+	manager := NewManager()
+
+	// Test window count for non-existent session
+	_, err := manager.GetWindowCount("non-existent-session")
+	if err == nil {
+		t.Error("Expected error for non-existent session window count")
+	}
+}
+
+// TestTmuxManagerIntegration_IsSessionAttached tests session attachment detection
+func TestTmuxManagerIntegration_IsSessionAttached(t *testing.T) {
+	manager := NewManager()
+
+	// Test attachment check for non-existent session
+	_, err := manager.IsSessionAttached("non-existent-session")
+	if err == nil {
+		t.Error("Expected error for non-existent session attachment check")
+	}
+}
+
+// TestTmuxManagerIntegration_GetSessionActivity tests session activity retrieval
+func TestTmuxManagerIntegration_GetSessionActivity(t *testing.T) {
+	manager := NewManager()
+
+	// Test activity check for non-existent session
+	_, err := manager.GetSessionActivity("non-existent-session")
+	if err == nil {
+		t.Error("Expected error for non-existent session activity check")
+	}
+}
+
+// TestTmuxManagerIntegration_RefreshSessionInfo tests comprehensive session refresh
+func TestTmuxManagerIntegration_RefreshSessionInfo(t *testing.T) {
+	manager := NewManager()
+
+	// Test session info refresh
+	sessionInfos, err := manager.RefreshSessionInfo()
+	if err != nil {
+		t.Logf("Session info refresh returned error (expected without tmux): %v", err)
+	} else {
+		t.Logf("Refreshed %d session infos", len(sessionInfos))
+		
+		// Verify session info structure
+		for _, info := range sessionInfos {
+			if info.Name == "" {
+				t.Error("Expected session info to have non-empty name")
+			}
+			if info.Windows < 0 {
+				t.Error("Expected session info windows to be non-negative")
+			}
+			if info.Status == "" {
+				t.Error("Expected session info to have non-empty status")
+			}
+		}
+	}
+}
+
+// TestTmuxManagerIntegration_SessionInfoStruct tests SessionInfo structure
+func TestTmuxManagerIntegration_SessionInfoStruct(t *testing.T) {
+	// Test SessionInfo struct creation and manipulation
+	info := SessionInfo{
+		Name:         "test-session",
+		Windows:      2,
+		Status:       "attached",
+		LastActivity: "5m ago",
+	}
+
+	if info.Name != "test-session" {
+		t.Errorf("Expected name 'test-session', got '%s'", info.Name)
+	}
+	if info.Windows != 2 {
+		t.Errorf("Expected 2 windows, got %d", info.Windows)
+	}
+	if info.Status != "attached" {
+		t.Errorf("Expected status 'attached', got '%s'", info.Status)
+	}
+	if info.LastActivity != "5m ago" {
+		t.Errorf("Expected activity '5m ago', got '%s'", info.LastActivity)
+	}
+}
+
+// TestTmuxManagerIntegration_ErrorHandling tests error handling in integration methods
+func TestTmuxManagerIntegration_ErrorHandling(t *testing.T) {
+	manager := NewManager()
+
+	// Test that all methods handle errors gracefully without panicking
+	defer func() {
+		if r := recover(); r != nil {
+			t.Errorf("Tmux manager integration panicked: %v", r)
+		}
+	}()
+
+	// Test various error conditions
+	_, err := manager.GetSessionInfo("")
+	if err == nil {
+		t.Error("Expected error for empty session name")
+	}
+
+	_, err = manager.GetWindowCount("")
+	if err == nil {
+		t.Error("Expected error for empty session name in window count")
+	}
+
+	_, err = manager.IsSessionAttached("")
+	if err == nil {
+		t.Error("Expected error for empty session name in attachment check")
+	}
+
+	_, err = manager.GetSessionActivity("")
+	if err == nil {
+		t.Error("Expected error for empty session name in activity check")
+	}
+}
+
 // Helper function to compare string slices
 func stringSliceEqual(a, b []string) bool {
   if len(a) != len(b) {
