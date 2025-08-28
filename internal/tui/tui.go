@@ -395,6 +395,9 @@ func (t *TUIApp) setupKeyBindings() {
 		case 'w', 'W':
 			t.ShowExportModal()
 			return nil
+		case 'v', 'V':
+			t.showHistoryDashboard()
+			return nil
 		}
 		
 		return event
@@ -2359,4 +2362,49 @@ func (t *TUIApp) showSearchInput() {
 		// Focus on the input field
 		t.app.SetFocus(inputField)
 	}
+}
+
+// showHistoryDashboard displays the history dashboard modal
+func (t *TUIApp) showHistoryDashboard() {
+	// Create history dashboard
+	dashboard, err := NewHistoryDashboard(t.app)
+	if err != nil {
+		t.showErrorModal(fmt.Sprintf("Failed to load history dashboard: %s", err.Error()))
+		return
+	}
+
+	// Create a modal-like wrapper for the dashboard
+	dashboardLayout := dashboard.GetLayout()
+	dashboardLayout.SetBorder(true).
+		SetTitle(" Connection History Dashboard ").
+		SetBorderColor(tcell.ColorYellow)
+
+	// Set up input capture for the dashboard to handle close keys
+	dashboardLayout.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEscape:
+			// Return to main TUI
+			dashboard.Close()
+			t.app.SetRoot(t.layout, true)
+			t.app.SetFocus(t.layout)
+			return nil
+		}
+		
+		// Handle character keys
+		switch event.Rune() {
+		case 'q', 'Q':
+			// Return to main TUI
+			dashboard.Close()
+			t.app.SetRoot(t.layout, true)
+			t.app.SetFocus(t.layout)
+			return nil
+		}
+		
+		// Let dashboard handle other keys
+		return event
+	})
+
+	// Show the dashboard
+	t.app.SetRoot(dashboardLayout, true)
+	t.app.SetFocus(dashboardLayout)
 }
