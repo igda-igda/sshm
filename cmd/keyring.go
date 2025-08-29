@@ -208,17 +208,25 @@ func runKeyringMigrateCommand(output io.Writer, serverName string) error {
 	fmt.Fprintf(output, "Using keyring service: %s\n", keyringManager.ServiceName())
 	fmt.Fprintf(output, "\n")
 
+	// Create a separate config for migration processing
+	// This preserves the original config while allowing filtered migration
+	migrationCfg := &config.Config{
+		Servers: cfg.Servers,
+		Keyring: cfg.Keyring,
+	}
+
 	// Filter servers if specific server requested
+	// IMPORTANT: Filter the migration config, not the original config
 	if serverName != "" {
 		server, err := cfg.GetServer(serverName)
 		if err != nil {
 			return fmt.Errorf("❌ Server '%s' not found", serverName)
 		}
-		cfg.Servers = []config.Server{*server}
+		migrationCfg.Servers = []config.Server{*server}
 	}
 
-	// Get migration status
-	migrationStatus := keyring.GetMigrationStatus(cfg)
+	// Get migration status based on the filtered config
+	migrationStatus := keyring.GetMigrationStatus(migrationCfg)
 	needsMigration := []keyring.MigrationStatus{}
 
 	for _, status := range migrationStatus {
@@ -244,14 +252,14 @@ func runKeyringMigrateCommand(output io.Writer, serverName string) error {
 		return nil
 	}
 
-	// Perform migration
+	// Perform migration on the filtered config
 	fmt.Fprintf(output, "\n%s\n", color.InfoMessage("Starting migration..."))
 
 	promptFunc := func(prompt string) (string, error) {
 		return promptForCredential(prompt)
 	}
 
-	results, err := keyring.MigrateFromPlaintext(cfg, keyringManager, promptFunc)
+	results, err := keyring.MigrateFromPlaintext(migrationCfg, keyringManager, promptFunc)
 	if err != nil {
 		return fmt.Errorf("❌ Migration failed: %w", err)
 	}
@@ -272,10 +280,49 @@ func runKeyringMigrateCommand(output io.Writer, serverName string) error {
 	}
 
 	if successCount > 0 {
-		// Save updated configuration
+		// Apply migration results to original config
+		// We need to update the original config with keyring settings from migrated servers
+		updatedServers := 0
+		for _, result := range results {
+			if result.Success {
+				// Find the server in the original config and update it
+				serverFound := false
+				for i := range cfg.Servers {
+					if cfg.Servers[i].Name == result.ServerName {
+						cfg.Servers[i].UseKeyring = true
+						cfg.Servers[i].KeyringID = result.KeyringID
+						serverFound = true
+						updatedServers++
+						break
+					}
+				}
+				
+				// This should not happen if our logic is correct, but let's be safe
+				if !serverFound {
+					fmt.Fprintf(output, "  ⚠️  Warning: Could not find server '%s' in original config to update\n", result.ServerName)
+				}
+			}
+		}
+
+		// Validate that we updated the expected number of servers
+		if updatedServers != successCount {
+			fmt.Fprintf(output, "  ⚠️  Warning: Updated %d servers but expected %d\n", updatedServers, successCount)
+		}
+
+		// Save updated configuration (now preserves all servers)
 		err = cfg.Save()
 		if err != nil {
-			return fmt.Errorf("❌ Failed to save configuration: %w", err)
+			// If save fails after successful migration, we need to clean up keyring entries
+			fmt.Fprintf(output, "\n❌ Failed to save configuration after successful migration: %v\n", err)
+			fmt.Fprintf(output, "%s\n", color.WarningText("Attempting to rollback keyring changes..."))
+			
+			rollbackErr := keyring.RollbackMigration(cfg, keyringManager, results)
+			if rollbackErr != nil {
+				return fmt.Errorf("❌ Critical error: Failed to save config AND failed to rollback keyring changes: save error: %w, rollback error: %v", err, rollbackErr)
+			}
+			
+			fmt.Fprintf(output, "%s\n", color.InfoMessage("✅ Rollback completed. Keyring entries have been removed."))
+			return fmt.Errorf("❌ Migration rolled back due to config save failure: %w", err)
 		}
 
 		fmt.Fprintf(output, "\n%s\n", 
