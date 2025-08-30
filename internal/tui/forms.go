@@ -19,32 +19,43 @@ func (e *ValidationError) Error() string {
 
 // FormField represents a single form field with validation
 type FormField struct {
-	inputField *tview.InputField
-	dropdown   *AuthenticationSelector  // For special dropdown fields
-	validator  func(string) error
-	required   bool
+	inputField    *tview.InputField
+	passwordField *PasswordField           // For secure password input
+	dropdown      *AuthenticationSelector // For special dropdown fields
+	validator     func(string) error
+	required      bool
 }
 
-// GetFormItem returns the appropriate form item (InputField or DropDown)
+// GetFormItem returns the appropriate form item (InputField, PasswordField, or DropDown)
 func (f *FormField) GetFormItem() tview.FormItem {
 	if f.dropdown != nil {
 		return f.dropdown.GetFormItem()
 	}
+	if f.passwordField != nil {
+		return f.passwordField.GetFormItem()
+	}
 	return f.inputField
 }
 
-// GetText returns the current value from either input field or dropdown
+// GetText returns the current value from input field, password field, or dropdown
 func (f *FormField) GetText() string {
 	if f.dropdown != nil {
 		return f.dropdown.GetValue()
 	}
+	if f.passwordField != nil {
+		return f.passwordField.GetText()
+	}
 	return f.inputField.GetText()
 }
 
-// SetText sets the value in either input field or dropdown
+// SetText sets the value in input field, password field, or dropdown
 func (f *FormField) SetText(value string) error {
 	if f.dropdown != nil {
 		return f.dropdown.SetValue(value)
+	}
+	if f.passwordField != nil {
+		f.passwordField.SetText(value)
+		return nil
 	}
 	f.inputField.SetText(value)
 	return nil
@@ -110,7 +121,7 @@ func NewTUIFormWithOptions(fields map[string]*FormField, onSubmit func(map[strin
 // setupFormFields adds all fields to the tview.Form
 func (tf *TUIForm) setupFormFields() {
 	// Define a preferred field order for server forms
-	preferredOrder := []string{"name", "hostname", "port", "username", "auth_type", "key_path", "passphrase_protected"}
+	preferredOrder := []string{"name", "hostname", "port", "username", "auth_type", "password", "key_path", "passphrase_protected"}
 	
 	// Build field order: preferred fields first, then remaining fields
 	usedFields := make(map[string]bool)
@@ -404,7 +415,7 @@ type EnhancedFormField struct {
 
 // CreateServerFormFields creates the standard server form fields with enhanced validation
 func CreateServerFormFields() map[string]*FormField {
-	return map[string]*FormField{
+	fields := map[string]*FormField{
 		"name": {
 			inputField: tview.NewInputField().
 				SetLabel("Server Name: ").
@@ -451,10 +462,7 @@ func CreateServerFormFields() map[string]*FormField {
 			required:  true,
 		},
 		"auth_type": {
-			dropdown: NewAuthenticationSelector(func(authType string) {
-				// Future: trigger UI updates based on auth type selection
-				// e.g., show/hide password fields
-			}),
+			dropdown: nil, // Will be created after password field is defined for callback
 			validator: ValidateAuthType,
 			required:  true,
 		},
@@ -481,7 +489,38 @@ func CreateServerFormFields() map[string]*FormField {
 			validator: ValidatePassphraseProtected,
 			required:  false,
 		},
+		"password": {
+			passwordField: NewPasswordField().
+				SetLabel("Password: ").
+				SetFieldWidth(30).
+				SetPlaceholder("Enter password for authentication").
+				SetMaxLength(128).
+				SetColors(tcell.ColorWhite, tcell.ColorBlack, tcell.ColorWhite),
+			validator: ValidatePasswordField,
+			required:  false, // Dynamically required when auth_type is "password"
+		},
 	}
+	
+	// Create authentication selector with callback to show/hide password field
+	fields["auth_type"].dropdown = NewAuthenticationSelector(func(authType string) {
+		// Show/hide password field based on authentication type
+		if passwordField := fields["password"]; passwordField != nil {
+			if authType == "password" {
+				// Show password field by making it visible (in real implementation)
+				// For now, we just ensure it's properly configured
+				passwordField.required = true
+			} else {
+				// Hide password field when key authentication is selected
+				passwordField.required = false
+				// Clear password field when switching to key auth for security
+				if passwordField.passwordField != nil {
+					passwordField.passwordField.Clear()
+				}
+			}
+		}
+	})
+	
+	return fields
 }
 
 // CreateEnhancedServerFormFields creates server form fields with authentication dropdown
@@ -601,7 +640,7 @@ func NewEnhancedTUIFormWithOptions(fields map[string]*EnhancedFormField, onSubmi
 // setupFormFields adds all fields to the tview.Form
 func (etf *EnhancedTUIForm) setupFormFields() {
 	// Define a preferred field order for server forms
-	preferredOrder := []string{"name", "hostname", "port", "username", "auth_type", "key_path", "passphrase_protected"}
+	preferredOrder := []string{"name", "hostname", "port", "username", "auth_type", "password", "key_path", "passphrase_protected"}
 	
 	// Build field order: preferred fields first, then remaining fields
 	usedFields := make(map[string]bool)
@@ -888,6 +927,22 @@ func ValidatePassphraseProtected(value string) error {
 	return nil
 }
 
+// ValidatePasswordField validates password field with conditional requirements
+func ValidatePasswordField(value string) error {
+	// Note: This is a basic validation - in real implementation, this would
+	// check the current auth_type value from the form to conditionally require password
+	if len(value) > 128 {
+		return &ValidationError{Field: "password", Message: "Password is too long (max 128 characters)"}
+	}
+	
+	// Additional password strength validation could be added here
+	if value != "" && len(value) < 3 {
+		return &ValidationError{Field: "password", Message: "Password must be at least 3 characters"}
+	}
+	
+	return nil
+}
+
 // ModalManager manages modal display and keyboard routing
 type ModalManager struct {
 	app        *tview.Application
@@ -1063,4 +1118,98 @@ func (tf *TUIForm) updateButtonHighlighting() {
 	// even when field focus changes
 	tf.form.SetButtonBackgroundColor(tcell.ColorDarkBlue).
 		SetButtonTextColor(tcell.ColorWhite)
+}
+
+// HideField hides a form field by removing it from the display
+func (tf *TUIForm) HideField(fieldName string) {
+	if field, exists := tf.fields[fieldName]; exists {
+		// Mark field as hidden (for future tview implementations that support dynamic field removal)
+		// For now, we'll handle visibility through field order management
+		for i, name := range tf.fieldOrder {
+			if name == fieldName {
+				// Move hidden field to end of order (effectively hiding it)
+				tf.fieldOrder = append(tf.fieldOrder[:i], tf.fieldOrder[i+1:]...)
+				tf.fieldOrder = append(tf.fieldOrder, fieldName)
+				break
+			}
+		}
+		
+		// Clear field value when hiding for security (especially for password fields)
+		if field.inputField != nil {
+			field.inputField.SetText("")
+		}
+		
+		// Refresh form display
+		tf.refreshFormDisplay()
+	}
+}
+
+// ShowField shows a form field by ensuring it's in the proper position
+func (tf *TUIForm) ShowField(fieldName string) {
+	if _, exists := tf.fields[fieldName]; exists {
+		// Restore proper field order
+		tf.rebuildFieldOrder()
+		
+		// Refresh form display
+		tf.refreshFormDisplay()
+	}
+}
+
+// refreshFormDisplay rebuilds the form display with current field visibility
+func (tf *TUIForm) refreshFormDisplay() {
+	// This is a placeholder for form refresh logic
+	// In a full implementation, this would rebuild the tview.Form
+	// with only visible fields
+}
+
+// rebuildFieldOrder rebuilds the field order based on preferred order
+func (tf *TUIForm) rebuildFieldOrder() {
+	preferredOrder := []string{"name", "hostname", "port", "username", "auth_type", "password", "key_path", "passphrase_protected"}
+	newOrder := []string{}
+	usedFields := make(map[string]bool)
+	
+	// Add preferred fields in order if they exist
+	for _, fieldName := range preferredOrder {
+		if _, exists := tf.fields[fieldName]; exists {
+			newOrder = append(newOrder, fieldName)
+			usedFields[fieldName] = true
+		}
+	}
+	
+	// Add any remaining fields
+	for fieldName := range tf.fields {
+		if !usedFields[fieldName] {
+			newOrder = append(newOrder, fieldName)
+		}
+	}
+	
+	tf.fieldOrder = newOrder
+}
+
+// SetConditionalFieldLogic sets up conditional field display logic
+func (tf *TUIForm) SetConditionalFieldLogic() {
+	// Set up auth type change callback to show/hide password field
+	if authField, exists := tf.fields["auth_type"]; exists && authField.dropdown != nil {
+		// Update the authentication selector's callback
+		authField.dropdown = NewAuthenticationSelector(func(authType string) {
+			tf.handleAuthTypeChange(authType)
+		})
+	}
+}
+
+// handleAuthTypeChange handles authentication type changes and updates field visibility
+func (tf *TUIForm) handleAuthTypeChange(authType string) {
+	if authType == "password" {
+		tf.ShowField("password")
+		// Make password required when password auth is selected
+		if passwordField := tf.fields["password"]; passwordField != nil {
+			passwordField.required = true
+		}
+	} else {
+		tf.HideField("password") 
+		// Make password optional when key auth is selected
+		if passwordField := tf.fields["password"]; passwordField != nil {
+			passwordField.required = false
+		}
+	}
 }

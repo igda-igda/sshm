@@ -54,6 +54,13 @@ func (t *TUIApp) CreateAddServerForm() *TUIForm {
 			server.KeyPath = keyPath
 		}
 		
+		// Handle password authentication
+		if password, ok := data["password"].(string); ok && password != "" && server.AuthType == "password" {
+			// In a real implementation, password would be securely stored
+			// For now, we'll add it to the server config (this should be encrypted)
+			server.Password = password
+		}
+		
 		// Handle passphrase protected flag
 		if passphraseStr, ok := data["passphrase_protected"].(string); ok {
 			server.PassphraseProtected = (passphraseStr == "true")
@@ -120,6 +127,10 @@ func (t *TUIApp) CreateEditServerForm(serverName string) *TUIForm {
 	} else {
 		fields["passphrase_protected"].SetText("false")
 	}
+	// Pre-populate password field if server uses password auth
+	if server.AuthType == "password" && server.Password != "" {
+		fields["password"].SetText(server.Password)
+	}
 	
 	// Override name validator to allow same name but check for conflicts with other servers
 	fields["name"].validator = func(value string) error {
@@ -162,6 +173,13 @@ func (t *TUIApp) CreateEditServerForm(serverName string) *TUIForm {
 		
 		if keyPath, ok := data["key_path"].(string); ok && keyPath != "" {
 			updatedServer.KeyPath = keyPath
+		}
+		
+		// Handle password authentication
+		if password, ok := data["password"].(string); ok && password != "" && updatedServer.AuthType == "password" {
+			// In a real implementation, password would be securely stored
+			// For now, we'll add it to the server config (this should be encrypted)
+			updatedServer.Password = password
 		}
 		
 		// Handle passphrase protected flag

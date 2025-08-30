@@ -17,6 +17,7 @@ type Server struct {
 	Username            string `yaml:"username" json:"username"`
 	AuthType            string `yaml:"auth_type" json:"auth_type"` // "key" or "password"
 	KeyPath             string `yaml:"key_path,omitempty" json:"key_path,omitempty"`
+	Password            string `yaml:"password,omitempty" json:"password,omitempty"` // For password authentication
 	PassphraseProtected bool   `yaml:"passphrase_protected,omitempty" json:"passphrase_protected,omitempty"`
 	UseKeyring          bool   `yaml:"use_keyring,omitempty" json:"use_keyring,omitempty"`
 	KeyringID           string `yaml:"keyring_id,omitempty" json:"keyring_id,omitempty"`
