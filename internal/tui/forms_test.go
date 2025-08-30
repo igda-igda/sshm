@@ -1213,8 +1213,15 @@ func TestCreateServerFormFields(t *testing.T) {
 		if field, exists := fields[fieldName]; !exists {
 			t.Errorf("Expected field '%s' to exist", fieldName)
 		} else {
-			if field.inputField == nil {
-				t.Errorf("Expected field '%s' to have inputField", fieldName)
+			// Special case for auth_type which should have dropdown instead of inputField
+			if fieldName == "auth_type" {
+				if field.dropdown == nil {
+					t.Errorf("Expected field '%s' to have dropdown", fieldName)
+				}
+			} else {
+				if field.inputField == nil {
+					t.Errorf("Expected field '%s' to have inputField", fieldName)
+				}
 			}
 			if field.validator == nil {
 				t.Errorf("Expected field '%s' to have validator", fieldName)
@@ -1260,13 +1267,13 @@ func TestFormIntegrationWithConfig(t *testing.T) {
 	fields := CreateServerFormFields()
 	
 	// Set valid server data
-	fields["name"].inputField.SetText("test-server")
-	fields["hostname"].inputField.SetText("test.example.com")
-	fields["port"].inputField.SetText("2222")
-	fields["username"].inputField.SetText("testuser")
-	fields["auth_type"].inputField.SetText("key")
-	fields["key_path"].inputField.SetText("~/.ssh/test_key")
-	fields["passphrase_protected"].inputField.SetText("true")
+	fields["name"].SetText("test-server")
+	fields["hostname"].SetText("test.example.com")
+	fields["port"].SetText("2222")
+	fields["username"].SetText("testuser")
+	fields["auth_type"].SetText("key")
+	fields["key_path"].SetText("~/.ssh/test_key")
+	fields["passphrase_protected"].SetText("true")
 
 	onSubmit := func(data map[string]interface{}) error {
 		// Simulate what the real form does - parse port
@@ -1436,17 +1443,28 @@ func TestFormFieldHighlightingBehavior(t *testing.T) {
 	
 	// Test that all form fields are properly configured for highlighting
 	for fieldName, field := range form.fields {
-		inputField := field.inputField
-		
 		// Verify field configuration that supports highlighting
-		if inputField == nil {
-			t.Errorf("Expected field '%s' to have input field", fieldName)
-			continue
-		}
-		
-		// Verify label is set (required for proper highlighting display)
-		if inputField.GetLabel() == "" {
-			t.Errorf("Expected field '%s' to have a label for highlighting", fieldName)
+		// Special case for auth_type which has dropdown instead of inputField
+		if fieldName == "auth_type" {
+			if field.dropdown == nil {
+				t.Errorf("Expected field '%s' to have dropdown", fieldName)
+				continue
+			}
+			// Verify label is set (required for proper highlighting display)
+			if field.dropdown.GetLabel() == "" {
+				t.Errorf("Expected field '%s' to have a label for highlighting", fieldName)
+			}
+		} else {
+			inputField := field.inputField
+			if inputField == nil {
+				t.Errorf("Expected field '%s' to have input field", fieldName)
+				continue
+			}
+			
+			// Verify label is set (required for proper highlighting display)
+			if inputField.GetLabel() == "" {
+				t.Errorf("Expected field '%s' to have a label for highlighting", fieldName)
+			}
 		}
 		
 		// Verify field width is set (affects highlighting appearance)
@@ -1703,8 +1721,16 @@ func TestFormFieldContrastAndVisibility(t *testing.T) {
 		if field == nil {
 			t.Errorf("Expected field to exist at index %d", i)
 		}
-		if field.inputField == nil {
-			t.Errorf("Expected input field to exist for field '%s'", fieldName)
+		
+		// Check for appropriate field type based on field name
+		if fieldName == "auth_type" {
+			if field.dropdown == nil {
+				t.Errorf("Expected dropdown to exist for field '%s'", fieldName)
+			}
+		} else {
+			if field.inputField == nil {
+				t.Errorf("Expected input field to exist for field '%s'", fieldName)
+			}
 		}
 	}
 	

@@ -109,16 +109,16 @@ func (t *TUIApp) CreateEditServerForm(serverName string) *TUIForm {
 	fields := CreateServerFormFields()
 	
 	// Pre-populate fields with existing server data
-	fields["name"].inputField.SetText(server.Name)
-	fields["hostname"].inputField.SetText(server.Hostname)
-	fields["port"].inputField.SetText(fmt.Sprintf("%d", server.Port))
-	fields["username"].inputField.SetText(server.Username)
-	fields["auth_type"].inputField.SetText(server.AuthType)
-	fields["key_path"].inputField.SetText(server.KeyPath)
+	fields["name"].SetText(server.Name)
+	fields["hostname"].SetText(server.Hostname)
+	fields["port"].SetText(fmt.Sprintf("%d", server.Port))
+	fields["username"].SetText(server.Username)
+	fields["auth_type"].SetText(server.AuthType)
+	fields["key_path"].SetText(server.KeyPath)
 	if server.PassphraseProtected {
-		fields["passphrase_protected"].inputField.SetText("true")
+		fields["passphrase_protected"].SetText("true")
 	} else {
-		fields["passphrase_protected"].inputField.SetText("false")
+		fields["passphrase_protected"].SetText("false")
 	}
 	
 	// Override name validator to allow same name but check for conflicts with other servers

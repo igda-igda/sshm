@@ -20,8 +20,34 @@ func (e *ValidationError) Error() string {
 // FormField represents a single form field with validation
 type FormField struct {
 	inputField *tview.InputField
+	dropdown   *AuthenticationSelector  // For special dropdown fields
 	validator  func(string) error
 	required   bool
+}
+
+// GetFormItem returns the appropriate form item (InputField or DropDown)
+func (f *FormField) GetFormItem() tview.FormItem {
+	if f.dropdown != nil {
+		return f.dropdown.GetFormItem()
+	}
+	return f.inputField
+}
+
+// GetText returns the current value from either input field or dropdown
+func (f *FormField) GetText() string {
+	if f.dropdown != nil {
+		return f.dropdown.GetValue()
+	}
+	return f.inputField.GetText()
+}
+
+// SetText sets the value in either input field or dropdown
+func (f *FormField) SetText(value string) error {
+	if f.dropdown != nil {
+		return f.dropdown.SetValue(value)
+	}
+	f.inputField.SetText(value)
+	return nil
 }
 
 // TUIForm represents a modal form with validation and keyboard navigation
@@ -93,7 +119,7 @@ func (tf *TUIForm) setupFormFields() {
 	for _, fieldName := range preferredOrder {
 		if field, exists := tf.fields[fieldName]; exists {
 			tf.fieldOrder = append(tf.fieldOrder, fieldName)
-			tf.form.AddFormItem(field.inputField)
+			tf.form.AddFormItem(field.GetFormItem())
 			usedFields[fieldName] = true
 		}
 	}
@@ -102,7 +128,7 @@ func (tf *TUIForm) setupFormFields() {
 	for fieldName, field := range tf.fields {
 		if !usedFields[fieldName] {
 			tf.fieldOrder = append(tf.fieldOrder, fieldName)
-			tf.form.AddFormItem(field.inputField)
+			tf.form.AddFormItem(field.GetFormItem())
 		}
 	}
 	
@@ -204,7 +230,7 @@ func (tf *TUIForm) CollectFormData() (map[string]interface{}, error) {
 	data := make(map[string]interface{})
 	
 	for fieldName, field := range tf.fields {
-		value := field.inputField.GetText()
+		value := field.GetText()
 		
 		// Validate field
 		if err := tf.ValidateField(fieldName, value); err != nil {
@@ -229,8 +255,7 @@ func (tf *TUIForm) SetFieldValue(fieldName, value string) error {
 		return fmt.Errorf("field %s does not exist", fieldName)
 	}
 	
-	field.inputField.SetText(value)
-	return nil
+	return field.SetText(value)
 }
 
 // GetFieldValue gets the current value of a specific field
@@ -240,7 +265,7 @@ func (tf *TUIForm) GetFieldValue(fieldName string) (string, error) {
 		return "", fmt.Errorf("field %s does not exist", fieldName)
 	}
 	
-	return field.inputField.GetText(), nil
+	return field.GetText(), nil
 }
 
 // setupRealTimeValidation configures real-time validation for form fields
@@ -250,11 +275,14 @@ func (tf *TUIForm) setupRealTimeValidation() {
 		currentFieldName := fieldName
 		currentField := field
 		
-		// Set up changed function for real-time validation
-		currentField.inputField.SetChangedFunc(func(text string) {
-			// Perform validation
-			tf.validateFieldRealTime(currentFieldName, text)
-		})
+		// Set up changed function for real-time validation only for InputFields
+		// Dropdowns handle changes through their callback mechanism
+		if currentField.inputField != nil {
+			currentField.inputField.SetChangedFunc(func(text string) {
+				// Perform validation
+				tf.validateFieldRealTime(currentFieldName, text)
+			})
+		}
 	}
 }
 
@@ -314,7 +342,7 @@ func (tf *TUIForm) ValidateAllFields() error {
 	tf.validationErrors = make(map[string]string) // Clear existing errors
 	
 	for fieldName, field := range tf.fields {
-		value := field.inputField.GetText()
+		value := field.GetText()
 		if err := tf.ValidateField(fieldName, value); err != nil {
 			tf.validationErrors[fieldName] = err.Error()
 		}
@@ -330,6 +358,48 @@ func (tf *TUIForm) ValidateAllFields() error {
 	}
 	
 	return nil
+}
+
+// FormFieldWithSelector represents a form field that can be either an InputField or a custom selector
+type FormFieldWithSelector struct {
+	inputField *tview.InputField
+	selector   *AuthenticationSelector
+	validator  func(string) error
+	required   bool
+}
+
+// GetFormItem returns the appropriate form item (InputField or DropDown)
+func (f *FormFieldWithSelector) GetFormItem() tview.FormItem {
+	if f.selector != nil {
+		return f.selector.GetFormItem()
+	}
+	return f.inputField
+}
+
+// GetText returns the current value from either input field or selector
+func (f *FormFieldWithSelector) GetText() string {
+	if f.selector != nil {
+		return f.selector.GetValue()
+	}
+	return f.inputField.GetText()
+}
+
+// SetText sets the value in either input field or selector
+func (f *FormFieldWithSelector) SetText(value string) error {
+	if f.selector != nil {
+		return f.selector.SetValue(value)
+	}
+	f.inputField.SetText(value)
+	return nil
+}
+
+// EnhancedFormField represents a form field that can contain either InputField or custom components
+type EnhancedFormField struct {
+	formItem  tview.FormItem
+	getValue  func() string
+	setValue  func(string) error
+	validator func(string) error
+	required  bool
 }
 
 // CreateServerFormFields creates the standard server form fields with enhanced validation
@@ -381,14 +451,10 @@ func CreateServerFormFields() map[string]*FormField {
 			required:  true,
 		},
 		"auth_type": {
-			inputField: tview.NewInputField().
-				SetLabel("Auth Type: ").
-				SetText("key").
-				SetFieldWidth(15).
-				SetPlaceholder("key or password").
-				SetFieldTextColor(tcell.ColorWhite).
-				SetFieldBackgroundColor(tcell.ColorBlack).
-				SetLabelColor(tcell.ColorWhite),
+			dropdown: NewAuthenticationSelector(func(authType string) {
+				// Future: trigger UI updates based on auth type selection
+				// e.g., show/hide password fields
+			}),
 			validator: ValidateAuthType,
 			required:  true,
 		},
@@ -416,6 +482,309 @@ func CreateServerFormFields() map[string]*FormField {
 			required:  false,
 		},
 	}
+}
+
+// CreateEnhancedServerFormFields creates server form fields with authentication dropdown
+func CreateEnhancedServerFormFields() map[string]*EnhancedFormField {
+	fields := make(map[string]*EnhancedFormField)
+	
+	// Standard input fields
+	standardFields := []struct {
+		name        string
+		label       string
+		width       int
+		placeholder string
+		defaultText string
+		validator   func(string) error
+		required    bool
+	}{
+		{"name", "Server Name: ", 30, "e.g., production-api", "", ValidateServerName, true},
+		{"hostname", "Hostname: ", 40, "e.g., example.com or 192.168.1.100", "", ValidateHostname, true},
+		{"port", "Port: ", 10, "1-65535", "22", ValidatePort, true},
+		{"username", "Username: ", 25, "e.g., ubuntu, admin, root", "", ValidateUsername, true},
+		{"key_path", "Key Path (optional): ", 50, "e.g., ~/.ssh/id_rsa", "", ValidateKeyPath, false},
+		{"passphrase_protected", "Passphrase Protected: ", 10, "true or false", "false", ValidatePassphraseProtected, false},
+	}
+	
+	for _, field := range standardFields {
+		inputField := tview.NewInputField().
+			SetLabel(field.label).
+			SetFieldWidth(field.width).
+			SetPlaceholder(field.placeholder).
+			SetText(field.defaultText).
+			SetFieldTextColor(tcell.ColorWhite).
+			SetFieldBackgroundColor(tcell.ColorBlack).
+			SetLabelColor(tcell.ColorWhite)
+			
+		fields[field.name] = &EnhancedFormField{
+			formItem: inputField,
+			getValue: func() string { return inputField.GetText() },
+			setValue: func(value string) error { inputField.SetText(value); return nil },
+			validator: field.validator,
+			required:  field.required,
+		}
+	}
+	
+	// Special authentication type dropdown field
+	authSelector := NewAuthenticationSelector(func(authType string) {
+		// This callback can be used for future functionality like showing/hiding password fields
+	})
+	
+	fields["auth_type"] = &EnhancedFormField{
+		formItem:  authSelector.GetFormItem(),
+		getValue:  func() string { return authSelector.GetValue() },
+		setValue:  func(value string) error { return authSelector.SetValue(value) },
+		validator: ValidateAuthType,
+		required:  true,
+	}
+	
+	return fields
+}
+
+// EnhancedTUIForm represents a modal form with validation and keyboard navigation using EnhancedFormField
+type EnhancedTUIForm struct {
+	form             *tview.Form
+	fields           map[string]*EnhancedFormField
+	fieldOrder       []string
+	onSubmit         func(map[string]interface{}) error
+	onCancel         func()
+	realTimeValidate bool
+	errorDisplay     *tview.TextView
+	validationErrors map[string]string
+	focusIndex       int
+}
+
+// NewEnhancedTUIForm creates a new enhanced TUI form
+func NewEnhancedTUIForm(fields map[string]*EnhancedFormField, onSubmit func(map[string]interface{}) error, onCancel func()) *EnhancedTUIForm {
+	return NewEnhancedTUIFormWithOptions(fields, onSubmit, onCancel, false)
+}
+
+// NewEnhancedTUIFormWithOptions creates a new enhanced TUI form with options
+func NewEnhancedTUIFormWithOptions(fields map[string]*EnhancedFormField, onSubmit func(map[string]interface{}) error, onCancel func(), realTimeValidate bool) *EnhancedTUIForm {
+	form := tview.NewForm()
+	
+	// Create error display area
+	errorDisplay := tview.NewTextView().
+		SetDynamicColors(true).
+		SetWrap(true).
+		SetMaxLines(3)
+	
+	tuiForm := &EnhancedTUIForm{
+		form:             form,
+		fields:           fields,
+		fieldOrder:       make([]string, 0, len(fields)),
+		onSubmit:         onSubmit,
+		onCancel:         onCancel,
+		realTimeValidate: realTimeValidate,
+		errorDisplay:     errorDisplay,
+		validationErrors: make(map[string]string),
+		focusIndex:       0,
+	}
+	
+	// Add fields to the form
+	tuiForm.setupFormFields()
+	
+	// Setup keyboard navigation
+	tuiForm.setupKeyboardNavigation()
+	
+	// Setup real-time validation if enabled
+	if realTimeValidate {
+		tuiForm.setupRealTimeValidation()
+	}
+	
+	// Apply initial focus styling
+	tuiForm.applyFocusStyling()
+	
+	return tuiForm
+}
+
+// setupFormFields adds all fields to the tview.Form
+func (etf *EnhancedTUIForm) setupFormFields() {
+	// Define a preferred field order for server forms
+	preferredOrder := []string{"name", "hostname", "port", "username", "auth_type", "key_path", "passphrase_protected"}
+	
+	// Build field order: preferred fields first, then remaining fields
+	usedFields := make(map[string]bool)
+	
+	// Add preferred fields in order if they exist
+	for _, fieldName := range preferredOrder {
+		if field, exists := etf.fields[fieldName]; exists {
+			etf.fieldOrder = append(etf.fieldOrder, fieldName)
+			etf.form.AddFormItem(field.formItem)
+			usedFields[fieldName] = true
+		}
+	}
+	
+	// Add any remaining fields
+	for fieldName, field := range etf.fields {
+		if !usedFields[fieldName] {
+			etf.fieldOrder = append(etf.fieldOrder, fieldName)
+			etf.form.AddFormItem(field.formItem)
+		}
+	}
+	
+	// Add error display if real-time validation is enabled
+	if etf.realTimeValidate {
+		etf.form.AddTextView("Errors:", "", 0, 3, true, false)
+	}
+	
+	// Add Submit and Cancel buttons with prominent styling
+	etf.form.AddButton("Submit", func() {
+		etf.handleSubmit()
+	})
+	
+	etf.form.AddButton("Cancel", func() {
+		etf.handleCancel()
+	})
+	
+	// Apply button styling after buttons are added
+	etf.setupButtonStyling()
+}
+
+// setupKeyboardNavigation configures keyboard navigation for the form
+func (etf *EnhancedTUIForm) setupKeyboardNavigation() {
+	etf.form.SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
+		switch event.Key() {
+		case tcell.KeyEnter:
+			// Enter key submits the form
+			etf.handleSubmit()
+			return nil
+		case tcell.KeyEscape:
+			// Escape key cancels the form
+			etf.handleCancel()
+			return nil
+		case tcell.KeyTab:
+			// Tab moves to next field with visual focus update
+			etf.moveFocusNext()
+			return event // Let tview handle Tab navigation
+		case tcell.KeyBacktab:
+			// Shift+Tab moves to previous field with visual focus update
+			etf.moveFocusPrevious()
+			return event // Let tview handle Shift+Tab navigation
+		}
+		return event
+	})
+}
+
+// handleSubmit processes form submission
+func (etf *EnhancedTUIForm) handleSubmit() {
+	// Collect and validate form data
+	data, err := etf.CollectFormData()
+	if err != nil {
+		// Handle validation error
+		return
+	}
+	
+	// Call the submission callback
+	if etf.onSubmit != nil {
+		if err := etf.onSubmit(data); err != nil {
+			// Handle submission error
+			return
+		}
+	}
+}
+
+// handleCancel processes form cancellation
+func (etf *EnhancedTUIForm) handleCancel() {
+	if etf.onCancel != nil {
+		etf.onCancel()
+	}
+}
+
+// ValidateField validates a single field
+func (etf *EnhancedTUIForm) ValidateField(fieldName, value string) error {
+	field, exists := etf.fields[fieldName]
+	if !exists {
+		return fmt.Errorf("field %s does not exist", fieldName)
+	}
+	
+	// Run custom validator first if provided
+	if field.validator != nil {
+		return field.validator(value)
+	}
+	
+	// Check required fields if no custom validator handled it
+	if field.required && value == "" {
+		return &ValidationError{
+			Field:   fieldName,
+			Message: "This field is required",
+		}
+	}
+	
+	return nil
+}
+
+// CollectFormData collects all form field data and validates it
+func (etf *EnhancedTUIForm) CollectFormData() (map[string]interface{}, error) {
+	data := make(map[string]interface{})
+	
+	for fieldName, field := range etf.fields {
+		value := field.getValue()
+		
+		// Validate field
+		if err := etf.ValidateField(fieldName, value); err != nil {
+			return nil, err
+		}
+		
+		data[fieldName] = value
+	}
+	
+	return data, nil
+}
+
+// GetForm returns the underlying tview.Form for display
+func (etf *EnhancedTUIForm) GetForm() *tview.Form {
+	return etf.form
+}
+
+// SetFieldValue sets the value of a specific field
+func (etf *EnhancedTUIForm) SetFieldValue(fieldName, value string) error {
+	field, exists := etf.fields[fieldName]
+	if !exists {
+		return fmt.Errorf("field %s does not exist", fieldName)
+	}
+	
+	return field.setValue(value)
+}
+
+// GetFieldValue gets the current value of a specific field
+func (etf *EnhancedTUIForm) GetFieldValue(fieldName string) (string, error) {
+	field, exists := etf.fields[fieldName]
+	if !exists {
+		return "", fmt.Errorf("field %s does not exist", fieldName)
+	}
+	
+	return field.getValue(), nil
+}
+
+// Additional helper methods for EnhancedTUIForm that mirror TUIForm functionality
+func (etf *EnhancedTUIForm) setupRealTimeValidation() {
+	// Real-time validation for enhanced form fields would need custom implementation
+	// For now, this is a placeholder
+}
+
+func (etf *EnhancedTUIForm) applyFocusStyling() {
+	// Apply styling to form fields - this would need custom implementation
+	// for different field types
+}
+
+func (etf *EnhancedTUIForm) moveFocusNext() {
+	etf.focusIndex = (etf.focusIndex + 1) % len(etf.fieldOrder)
+	etf.applyFocusStyling()
+}
+
+func (etf *EnhancedTUIForm) moveFocusPrevious() {
+	etf.focusIndex = (etf.focusIndex - 1 + len(etf.fieldOrder)) % len(etf.fieldOrder)
+	etf.applyFocusStyling()
+}
+
+func (etf *EnhancedTUIForm) setupButtonStyling() {
+	// Apply form-level styling that affects buttons
+	etf.form.SetButtonBackgroundColor(tcell.ColorDarkBlue).
+		SetButtonTextColor(tcell.ColorWhite).
+		SetLabelColor(tcell.ColorWhite).
+		SetFieldBackgroundColor(tcell.ColorBlack).
+		SetFieldTextColor(tcell.ColorWhite)
 }
 
 // Enhanced validation functions
@@ -622,17 +991,24 @@ func (tf *TUIForm) applyFocusStyling() {
 			continue
 		}
 		
-		inputField := field.inputField
 		if i == tf.focusIndex {
 			// Apply focused field styling
-			inputField.SetFieldTextColor(tcell.ColorBlack).
-				SetFieldBackgroundColor(tcell.ColorWhite).
-				SetLabelColor(tcell.ColorYellow)
+			if field.inputField != nil {
+				field.inputField.SetFieldTextColor(tcell.ColorBlack).
+					SetFieldBackgroundColor(tcell.ColorWhite).
+					SetLabelColor(tcell.ColorYellow)
+			} else if field.dropdown != nil {
+				field.dropdown.ApplyFocusStyling()
+			}
 		} else {
-			// Apply unfocused field styling  
-			inputField.SetFieldTextColor(tcell.ColorWhite).
-				SetFieldBackgroundColor(tcell.ColorBlack).
-				SetLabelColor(tcell.ColorWhite)
+			// Apply unfocused field styling
+			if field.inputField != nil {
+				field.inputField.SetFieldTextColor(tcell.ColorWhite).
+					SetFieldBackgroundColor(tcell.ColorBlack).
+					SetLabelColor(tcell.ColorWhite)
+			} else if field.dropdown != nil {
+				field.dropdown.ApplyUnfocusStyling()
+			}
 		}
 	}
 	
