@@ -9,6 +9,8 @@ import (
   "strings"
 
   "github.com/spf13/cobra"
+  "golang.org/x/term"
+  "sshm/internal/auth"
   "sshm/internal/color"
   "sshm/internal/config"
 )
@@ -179,6 +181,34 @@ func runAddCommand(cmd *cobra.Command, args []string, output io.Writer) error {
     }
   }
 
+  // Handle password authentication
+  var password string
+  if authType == "password" {
+    if usingFlags {
+      // In CLI flag mode, prompt for password as it's sensitive information
+      fmt.Fprintf(output, "Enter password for %s@%s: ", username, hostname)
+      passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+      fmt.Println() // New line after password input
+      if err != nil {
+        return fmt.Errorf("❌ Failed to read password: %w", err)
+      }
+      password = string(passwordBytes)
+    } else {
+      // In interactive mode, also prompt securely for password
+      fmt.Fprint(output, "Enter password: ")
+      passwordBytes, err := term.ReadPassword(int(os.Stdin.Fd()))
+      fmt.Println() // New line after password input
+      if err != nil {
+        return fmt.Errorf("❌ Failed to read password: %w", err)
+      }
+      password = string(passwordBytes)
+    }
+    
+    if password == "" {
+      return fmt.Errorf("❌ Password cannot be empty for password authentication")
+    }
+  }
+
   // Create server configuration
   server := config.Server{
     Name:     serverName,
@@ -202,6 +232,28 @@ func runAddCommand(cmd *cobra.Command, args []string, output io.Writer) error {
   // Add server to configuration
   if err := cfg.AddServer(server); err != nil {
     return fmt.Errorf("❌ Failed to add server: %w", err)
+  }
+
+  // Handle password storage for password authentication
+  if authType == "password" && password != "" {
+    // Initialize password manager with keyring backend
+    passwordManager, err := auth.NewPasswordManager(cfg.Keyring.Service)
+    if err != nil {
+      return fmt.Errorf("❌ Failed to initialize secure password storage: %w", err)
+    }
+
+    // Store password securely in keyring
+    if err := passwordManager.StoreServerPassword(&server, password); err != nil {
+      return fmt.Errorf("❌ Failed to store password securely: %w", err)
+    }
+
+    // Update the server in the configuration to reflect keyring usage
+    cfg.RemoveServer(server.Name) // Remove the old entry
+    if err := cfg.AddServer(server); err != nil { // Add updated entry with keyring settings
+      return fmt.Errorf("❌ Failed to update server configuration: %w", err)
+    }
+
+    fmt.Fprintf(output, "%s\n", color.InfoMessage("Password stored securely using %s keyring", passwordManager.ServiceName()))
   }
 
   // Save configuration

@@ -21,6 +21,12 @@ type KeyringManager interface {
 	List() ([]string, error)
 	IsAvailable() bool
 	ServiceName() string
+	
+	// Password-specific operations
+	StoreServerPassword(serverName, password string) error
+	RetrieveServerPassword(serverName string) (string, error)
+	DeleteServerPassword(serverName string) error
+	HasServerPassword(serverName string) bool
 }
 
 // manager implements KeyringManager using the 99designs/keyring library
@@ -253,4 +259,36 @@ func (m *manager) prefixKey(key string) string {
 		return m.namespace + ":"
 	}
 	return m.namespace + ":" + key
+}
+
+// Password-specific keyring operations
+
+// GeneratePasswordKeyringID generates a unique keyring ID for server password storage
+func GeneratePasswordKeyringID(serverName string) string {
+	return "password-" + serverName
+}
+
+// StoreServerPassword stores a password for a server in the keyring
+func (m *manager) StoreServerPassword(serverName, password string) error {
+	keyringID := GeneratePasswordKeyringID(serverName)
+	return m.Store(keyringID, password)
+}
+
+// RetrieveServerPassword retrieves a password for a server from the keyring
+func (m *manager) RetrieveServerPassword(serverName string) (string, error) {
+	keyringID := GeneratePasswordKeyringID(serverName)
+	return m.Retrieve(keyringID)
+}
+
+// DeleteServerPassword deletes a password for a server from the keyring
+func (m *manager) DeleteServerPassword(serverName string) error {
+	keyringID := GeneratePasswordKeyringID(serverName)
+	return m.Delete(keyringID)
+}
+
+// HasServerPassword checks if a password is stored for a server
+func (m *manager) HasServerPassword(serverName string) bool {
+	keyringID := GeneratePasswordKeyringID(serverName)
+	_, err := m.Retrieve(keyringID)
+	return err == nil
 }

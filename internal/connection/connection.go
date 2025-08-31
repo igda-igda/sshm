@@ -7,6 +7,7 @@ import (
 	"time"
 
 	"golang.org/x/crypto/ssh"
+	"sshm/internal/auth"
 	"sshm/internal/config"
 	"sshm/internal/history"
 	sshsdk "sshm/internal/ssh"
@@ -264,34 +265,50 @@ func (m *Manager) testSSHConnectivity(server config.Server) error {
 	}
 
 	// Determine authentication method
-	var auth ssh.AuthMethod
+	var authMethod ssh.AuthMethod
 	var err error
 
 	switch server.AuthType {
 	case "key":
 		if server.KeyPath != "" {
 			// For connectivity test, try without passphrase first
-			auth, err = sshsdk.NewKeyAuth(server.KeyPath, "")
+			authMethod, err = sshsdk.NewKeyAuth(server.KeyPath, "")
 			if err != nil {
 				return fmt.Errorf("failed to create key auth: %w", err)
 			}
 		} else {
 			// Try SSH agent
-			auth, err = sshsdk.NewAgentAuth()
+			authMethod, err = sshsdk.NewAgentAuth()
 			if err != nil {
 				return fmt.Errorf("failed to create agent auth: %w", err)
 			}
 		}
 	case "password":
-		// For connectivity test, we'll use a dummy password 
-		// The actual connection will prompt for password
-		return nil // Skip connectivity test for password auth to avoid prompting
+		// For connectivity test, try to retrieve password from keyring
+		if server.UseKeyring && server.KeyringID != "" {
+			// Initialize password manager
+			passwordManager, err := auth.NewPasswordManager("auto") // Use auto to select best available backend
+			if err != nil {
+				return fmt.Errorf("failed to initialize password manager: %w", err)
+			}
+
+			// Retrieve password from keyring
+			password, err := passwordManager.RetrieveServerPassword(&server)
+			if err != nil {
+				return fmt.Errorf("failed to retrieve password from keyring: %w", err)
+			}
+
+			authMethod = sshsdk.NewPasswordAuth(password)
+		} else {
+			// Skip connectivity test for plaintext password auth to avoid prompting user during test
+			return nil
+		}
 	default:
 		return fmt.Errorf("unsupported auth type: %s", server.AuthType)
 	}
 
 	// Test the connection
-	return sshsdk.TestConnection(sshConfig, auth)
+	return sshsdk.TestConnection(sshConfig, authMethod)
 }
 
 // buildSSHCommand builds the SSH command string for a server
@@ -300,8 +317,32 @@ func buildSSHCommand(server config.Server) (string, error) {
 		return "", fmt.Errorf("invalid server configuration: %w", err)
 	}
 
-	// Build base SSH command with pseudo-terminal allocation
-	sshCmd := fmt.Sprintf("ssh -t %s@%s", server.Username, server.Hostname)
+	var sshCmd string
+
+	// Handle password authentication with keyring
+	if server.AuthType == "password" && server.UseKeyring && server.KeyringID != "" {
+		// Try to use sshpass for non-interactive password authentication
+		// Note: This requires sshpass to be installed on the system
+		
+		// Initialize password manager to retrieve password
+		passwordManager, err := auth.NewPasswordManager("auto")
+		if err != nil {
+			// Fall back to interactive SSH if password manager fails
+			sshCmd = fmt.Sprintf("ssh -t %s@%s", server.Username, server.Hostname)
+		} else {
+			password, err := passwordManager.RetrieveServerPassword(&server)
+			if err != nil {
+				// Fall back to interactive SSH if password retrieval fails
+				sshCmd = fmt.Sprintf("ssh -t %s@%s", server.Username, server.Hostname)
+			} else {
+				// Use sshpass with retrieved password
+				sshCmd = fmt.Sprintf("sshpass -p '%s' ssh -t %s@%s", password, server.Username, server.Hostname)
+			}
+		}
+	} else {
+		// Build base SSH command with pseudo-terminal allocation
+		sshCmd = fmt.Sprintf("ssh -t %s@%s", server.Username, server.Hostname)
+	}
 
 	// Add port if not default
 	if server.Port != 22 {
