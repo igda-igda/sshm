@@ -3,8 +3,7 @@ package tui
 import (
 	"fmt"
 
-	"github.com/gdamore/tcell/v2"
-	"github.com/rivo/tview"
+	"sshm/internal/auth"
 	"sshm/internal/config"
 )
 
@@ -54,11 +53,18 @@ func (t *TUIApp) CreateAddServerForm() *TUIForm {
 			server.KeyPath = keyPath
 		}
 		
-		// Handle password authentication
+		// Handle password authentication with keyring storage
 		if password, ok := data["password"].(string); ok && password != "" && server.AuthType == "password" {
-			// In a real implementation, password would be securely stored
-			// For now, we'll add it to the server config (this should be encrypted)
-			server.Password = password
+			// Store password securely in keyring
+			passwordManager, err := auth.NewPasswordManager("auto")
+			if err != nil {
+				return &ValidationError{Field: "password", Message: fmt.Sprintf("Failed to initialize password manager: %s", err.Error())}
+			}
+			
+			// Store password in keyring and configure server to use it
+			if err := passwordManager.StoreServerPassword(&server, password); err != nil {
+				return &ValidationError{Field: "password", Message: fmt.Sprintf("Failed to store password: %s", err.Error())}
+			}
 		}
 		
 		// Handle passphrase protected flag
@@ -127,9 +133,11 @@ func (t *TUIApp) CreateEditServerForm(serverName string) *TUIForm {
 	} else {
 		fields["passphrase_protected"].SetText("false")
 	}
-	// Pre-populate password field if server uses password auth
-	if server.AuthType == "password" && server.Password != "" {
-		fields["password"].SetText(server.Password)
+	// Handle password field for password authentication
+	// For security, we don't pre-populate the password field when editing
+	// Users must re-enter the password if they want to update it
+	if server.AuthType == "password" {
+		// Leave password field empty for security - user can enter new password if needed
 	}
 	
 	// Override name validator to allow same name but check for conflicts with other servers
@@ -175,11 +183,24 @@ func (t *TUIApp) CreateEditServerForm(serverName string) *TUIForm {
 			updatedServer.KeyPath = keyPath
 		}
 		
-		// Handle password authentication
+		// Handle password authentication with keyring storage
 		if password, ok := data["password"].(string); ok && password != "" && updatedServer.AuthType == "password" {
-			// In a real implementation, password would be securely stored
-			// For now, we'll add it to the server config (this should be encrypted)
-			updatedServer.Password = password
+			// Store password securely in keyring
+			passwordManager, err := auth.NewPasswordManager("auto")
+			if err != nil {
+				return &ValidationError{Field: "password", Message: fmt.Sprintf("Failed to initialize password manager: %s", err.Error())}
+			}
+			
+			// Update password in keyring and configure server to use it
+			if err := passwordManager.StoreServerPassword(&updatedServer, password); err != nil {
+				return &ValidationError{Field: "password", Message: fmt.Sprintf("Failed to store password: %s", err.Error())}
+			}
+		} else if updatedServer.AuthType == "password" {
+			// If password auth but no new password provided, preserve existing keyring settings
+			if server.UseKeyring && server.KeyringID != "" {
+				updatedServer.UseKeyring = server.UseKeyring
+				updatedServer.KeyringID = server.KeyringID
+			}
 		}
 		
 		// Handle passphrase protected flag
@@ -229,87 +250,22 @@ func (t *TUIApp) CreateEditServerForm(serverName string) *TUIForm {
 	return NewTUIFormWithOptions(fields, onSubmit, onCancel, true)
 }
 
-// ShowAddServerModal displays the add server modal
+// ShowAddServerModal displays the add server modal using native tview form
 func (t *TUIApp) ShowAddServerModal() {
-	form := t.CreateAddServerForm()
-	
-	// Create flex container for the form with title and border
-	container := tview.NewFlex().
-		SetDirection(tview.FlexRow).
-		AddItem(tview.NewTextView().SetText(" Add New Server ").SetTextAlign(tview.AlignCenter), 1, 0, false).
-		AddItem(form.GetForm(), 0, 1, true)
-	
-	container.SetBorder(true).SetTitle(" Add Server ").SetBorderColor(tcell.ColorYellow)
-	
-	// Create modal wrapper with the form
-	modal := tview.NewModal().
-		SetBackgroundColor(tcell.ColorDarkBlue).
-		SetText("").
-		AddButtons([]string{}).
-		SetDoneFunc(func(buttonIndex int, buttonLabel string) {
-			// This won't be called since we have no buttons
-		})
-	
-	// Replace modal content with our form
-	modal.SetText("")
-	
-	// Setup enhanced keyboard navigation for the form directly
-	form.GetForm().SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyEscape:
-			if t.modalManager != nil {
-				t.modalManager.HideModal()
-			}
-			return nil
-		case tcell.KeyTab:
-			// Let tview handle Tab navigation between form fields
-			return event
-		case tcell.KeyBacktab:
-			// Let tview handle Shift+Tab navigation
-			return event
-		case tcell.KeyEnter:
-			// Let form handle Enter for submission
-			return event
-		}
-		return event
-	})
+	form := t.CreateNativeAddServerForm()
 	
 	// Show the form directly as modal
 	if t.modalManager != nil {
-		t.modalManager.ShowModal(form.GetForm())
+		t.modalManager.ShowModal(form)
 	}
 }
 
-// ShowEditServerModal displays the edit server modal
+// ShowEditServerModal displays the edit server modal using native tview form
 func (t *TUIApp) ShowEditServerModal(serverName string) {
-	form := t.CreateEditServerForm(serverName)
-	
-	// Setup enhanced keyboard navigation for the form directly
-	form.GetForm().SetInputCapture(func(event *tcell.EventKey) *tcell.EventKey {
-		switch event.Key() {
-		case tcell.KeyEscape:
-			if t.modalManager != nil {
-				t.modalManager.HideModal()
-			}
-			return nil
-		case tcell.KeyTab:
-			// Let tview handle Tab navigation between form fields
-			return event
-		case tcell.KeyBacktab:
-			// Let tview handle Shift+Tab navigation
-			return event
-		case tcell.KeyEnter:
-			// Let form handle Enter for submission
-			return event
-		}
-		return event
-	})
-	
-	// Set title and border for the form
-	form.GetForm().SetBorder(true).SetTitle(fmt.Sprintf(" Edit Server: %s ", serverName)).SetBorderColor(tcell.ColorYellow)
+	form := t.CreateNativeEditServerForm(serverName)
 	
 	// Show the form directly as modal
 	if t.modalManager != nil {
-		t.modalManager.ShowModal(form.GetForm())
+		t.modalManager.ShowModal(form)
 	}
 }
