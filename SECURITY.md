@@ -100,5 +100,3 @@ For security-related questions or concerns:
 ---
 
 **Thank you for helping keep SSHM and the SSH ecosystem secure!**
-
-*Last updated: January 2025*
