@@ -18,8 +18,8 @@ SSHM handles sensitive SSH credentials and server connections. If you discover a
 **Please do not report security vulnerabilities through public GitHub issues.**
 
 Instead, please report them via:
-- GitHub's private vulnerability reporting feature at: https://github.com/igda-igda/sshm/security/advisories/new
-- Email: Create a GitHub issue marked as "Security" if private reporting is unavailable
+- GitHub Issues: Create a new issue with the "Security" label at: https://github.com/igda-igda/sshm/issues/new
+- Email the repository maintainers directly through GitHub if you prefer private disclosure
 
 ### What to Include in Your Report
 
