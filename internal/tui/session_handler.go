@@ -6,7 +6,6 @@ import (
 	"os"
 	"os/signal"
 	"sync"
-	"syscall"
 	"time"
 
 	"sshm/internal/tmux"
@@ -114,7 +113,7 @@ func (sh *SessionReturnHandler) AttachToSessionWithReturn(sessionName string) er
 // setupSignalHandlers sets up signal handling for session detachment detection
 func (sh *SessionReturnHandler) setupSignalHandlers() {
 	// Listen for signals that might indicate session detachment
-	signal.Notify(sh.signalChannel, syscall.SIGWINCH, syscall.SIGCONT)
+	sh.setupPlatformSignals()
 	
 	go func() {
 		for {
