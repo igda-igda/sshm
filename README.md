@@ -46,7 +46,23 @@ sudo mv sshm /usr/local/bin/
 ```
 
 ### Binary Releases
-Pre-built binaries available for Linux, macOS, and Windows (coming soon).
+Download pre-built binaries from [GitHub Releases](https://github.com/igda-igda/sshm/releases/latest):
+
+| Platform | Architecture | Download |
+|----------|-------------|----------|
+| 🐧 Linux | AMD64 | [sshm-linux-amd64](https://github.com/igda-igda/sshm/releases/download/v1.4.0/sshm-linux-amd64) |
+| 🐧 Linux | ARM64 | [sshm-linux-arm64](https://github.com/igda-igda/sshm/releases/download/v1.4.0/sshm-linux-arm64) |
+| 🍎 macOS | Intel | [sshm-darwin-amd64](https://github.com/igda-igda/sshm/releases/download/v1.4.0/sshm-darwin-amd64) |
+| 🍎 macOS | Apple Silicon | [sshm-darwin-arm64](https://github.com/igda-igda/sshm/releases/download/v1.4.0/sshm-darwin-arm64) |
+| 🪟 Windows | AMD64 | [sshm-windows-amd64.exe](https://github.com/igda-igda/sshm/releases/download/v1.4.0/sshm-windows-amd64.exe) |
+
+**Installation:**
+```bash
+# Linux/macOS example
+curl -L https://github.com/igda-igda/sshm/releases/download/v1.4.0/sshm-linux-amd64 -o sshm
+chmod +x sshm
+sudo mv sshm /usr/local/bin/
+```
 
 **Requirements:** tmux, SSH client
 
