@@ -25,7 +25,7 @@ SSHM is a professional SSH connection manager designed for DevOps teams managing
 
 **Key Benefits:**
 - **Visual Management** - TUI interface for browsing and organizing servers
-- **Session Persistence** - tmux integration with intelligent session handling  
+- **Session Persistence** - tmux integration with intelligent session handling
 - **Enterprise Security** - Encrypted credential storage with multiple auth methods
 - **Team Workflows** - Profile-based organization and configuration sharing
 
@@ -98,7 +98,7 @@ sshm batch --profile production
 - **Real-time Monitoring** - Connection status and session health
 - **Keyboard Shortcuts** - Full control without mouse interaction
 
-### Session Management  
+### Session Management
 - **Intelligent tmux Integration** - Automatic session creation and naming
 - **Single Server Mode** - Dedicated sessions per server
 - **Group Mode** - One session with multiple windows per profile
@@ -112,7 +112,7 @@ sshm batch --profile production
 
 ### Team Collaboration
 - **Profile Organization** - Environment-based grouping (dev/staging/prod)
-- **Configuration Export** - YAML/JSON sharing between teams  
+- **Configuration Export** - YAML/JSON sharing between teams
 - **Import Support** - SSH config and team configurations
 - **Batch Operations** - Simultaneous environment connections
 
@@ -153,10 +153,10 @@ sshm remove <name>              # Remove server
 
 ### Profile Management
 ```bash
-sshm profile create <name>      # Create profile
-sshm profile list               # List profiles
+sshm profile create <name>              # Create profile
+sshm profile list                       # List profiles
 sshm profile assign <server> <profile>  # Assign server
-sshm profile delete <name>      # Delete profile
+sshm profile delete <name>              # Delete profile
 ```
 
 ### Session Control
@@ -168,7 +168,7 @@ sshm history [--days N]         # Connection history
 
 ### Configuration
 ```bash
-sshm import <file>              # Import configuration
+sshm import <file>                     # Import configuration
 sshm export <file> [--profile <name>]  # Export configuration
 sshm export <file> --format json       # Export as JSON
 ```
