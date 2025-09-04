@@ -61,6 +61,7 @@ func (h *HelpSystem) getServersHelpContent() string {
 [white::b]🧭 Navigation:[white::-]
 [yellow]↑/↓, j/k[white]: Move selection up/down in server list
 [yellow]s[white]: Switch focus to Sessions panel
+[yellow]v[white]: View connection history dashboard
 [yellow]Home/End[white]: Jump to first/last server
 
 [white::b]💾 Configuration:[white::-]
@@ -96,6 +97,7 @@ func (h *HelpSystem) getSessionsHelpContent() string {
 [white::b]🧭 Navigation:[white::-]
 [yellow]↑/↓, j/k[white]: Move up/down in session list
 [yellow]s[white]: Switch focus to Servers panel
+[yellow]v[white]: View connection history dashboard
 [yellow]Home/End[white]: Jump to first/last session
 
 [white::b]🚦 Session Status Indicators:[white::-]
@@ -136,6 +138,7 @@ func (h *HelpSystem) getGeneralHelpContent() string {
 [yellow]?[white]: Show/hide help system
 [yellow]r[white]: Refresh all data
 [yellow]s[white]: Switch between panels
+[yellow]v[white]: View connection history dashboard
 [yellow]Escape[white]: Cancel/close modals
 
 [white::b]💾 Configuration:[white::-]
@@ -250,6 +253,7 @@ func (h *HelpSystem) getShortcutsReference() string {
 [yellow]?[white]: Show context-sensitive help
 [yellow]r[white]: Refresh all data from disk
 [yellow]s[white]: Switch focus between panels
+[yellow]v[white]: View connection history dashboard
 [yellow]Escape[white]: Cancel/close modals and dialogs
 
 [white::b]🖥️  Servers Panel Navigation:[white::-]

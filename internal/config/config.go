@@ -17,7 +17,10 @@ type Server struct {
 	Username            string `yaml:"username" json:"username"`
 	AuthType            string `yaml:"auth_type" json:"auth_type"` // "key" or "password"
 	KeyPath             string `yaml:"key_path,omitempty" json:"key_path,omitempty"`
+	Password            string `yaml:"password,omitempty" json:"password,omitempty"` // For password authentication
 	PassphraseProtected bool   `yaml:"passphrase_protected,omitempty" json:"passphrase_protected,omitempty"`
+	UseKeyring          bool   `yaml:"use_keyring,omitempty" json:"use_keyring,omitempty"`
+	KeyringID           string `yaml:"keyring_id,omitempty" json:"keyring_id,omitempty"`
 }
 
 // Getter methods for tmux Server interface compatibility
@@ -35,11 +38,19 @@ type Profile struct {
 	Servers     []string `yaml:"servers" json:"servers"`
 }
 
+// KeyringConfig represents keyring configuration
+type KeyringConfig struct {
+	Service   string `yaml:"service,omitempty" json:"service,omitempty"`       // "auto", "keychain", "wincred", "secret-service", "file"
+	Enabled   bool   `yaml:"enabled" json:"enabled"`                           // Whether keyring is enabled
+	Namespace string `yaml:"namespace,omitempty" json:"namespace,omitempty"`   // Keyring namespace (default: "sshm")
+}
+
 // Config represents the main configuration structure
 type Config struct {
-	Servers    []Server  `yaml:"servers" json:"servers"`
-	Profiles   []Profile `yaml:"profiles,omitempty" json:"profiles,omitempty"`
-	configPath string    // internal field to track config file path
+	Servers    []Server      `yaml:"servers" json:"servers"`
+	Profiles   []Profile     `yaml:"profiles,omitempty" json:"profiles,omitempty"`
+	Keyring    KeyringConfig `yaml:"keyring,omitempty" json:"keyring,omitempty"`
+	configPath string        // internal field to track config file path
 }
 
 // DefaultConfigPath returns the default configuration file path
@@ -76,9 +87,18 @@ func LoadFromPath(configPath string) (*Config, error) {
 		return nil, fmt.Errorf("failed to create config directory: %w", err)
 	}
 
-	// If file doesn't exist, return empty config
+	// If file doesn't exist, return empty config with defaults
 	if _, err := os.Stat(configPath); os.IsNotExist(err) {
-		return &Config{Servers: []Server{}, Profiles: []Profile{}, configPath: configPath}, nil
+		return &Config{
+			Servers:  []Server{},
+			Profiles: []Profile{},
+			Keyring: KeyringConfig{
+				Service:   "auto",
+				Enabled:   true,
+				Namespace: "sshm",
+			},
+			configPath: configPath,
+		}, nil
 	}
 
 	// Read file
@@ -96,6 +116,18 @@ func LoadFromPath(configPath string) (*Config, error) {
 	// Ensure backward compatibility: initialize Profiles if nil
 	if config.Profiles == nil {
 		config.Profiles = []Profile{}
+	}
+
+	// Initialize keyring config with defaults if not set
+	if config.Keyring.Service == "" {
+		config.Keyring.Service = "auto"
+	}
+	if config.Keyring.Namespace == "" {
+		config.Keyring.Namespace = "sshm"
+	}
+	// Default to enabled for new installations
+	if config.Keyring.Service == "auto" && !config.hasAnyKeyringSettings() {
+		config.Keyring.Enabled = true
 	}
 
 	config.configPath = configPath
@@ -375,4 +407,22 @@ func (c *Config) UnassignServerFromProfile(serverName, profileName string) error
 	}
 
 	return fmt.Errorf("server '%s' is not assigned to profile '%s'", serverName, profileName)
+}
+
+// hasAnyKeyringSettings checks if the config has any keyring-related settings
+// This is used to determine if keyring should be enabled by default
+func (c *Config) hasAnyKeyringSettings() bool {
+	// Check if any servers are using keyring
+	for _, server := range c.Servers {
+		if server.UseKeyring || server.KeyringID != "" {
+			return true
+		}
+	}
+	
+	// Check if keyring is explicitly configured
+	if c.Keyring.Enabled || c.Keyring.Service != "" || c.Keyring.Namespace != "" {
+		return true
+	}
+	
+	return false
 }
