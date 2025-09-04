@@ -4,8 +4,8 @@
 
 <img src="SSHM.jpeg" alt="SSHM - SSH Connection Manager" width="100%">
 
-[![Go](https://github.com/idabic/sshm/workflows/Go/badge.svg)](https://github.com/idabic/sshm/actions)
-[![Go Report Card](https://goreportcard.com/badge/github.com/igda-igda/sshm)](https://goreportcard.com/report/github.com/idabic/sshm)
+[![Go](https://github.com/igda-igda/sshm/workflows/Go/badge.svg)](https://github.com/igda-igda/sshm/actions)
+[![Go Report Card](https://goreportcard.com/badge/github.com/igda-igda/sshm)](https://goreportcard.com/report/github.com/igda-igda/sshm)
 [![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](https://opensource.org/licenses/MIT)
 [![Go Version](https://img.shields.io/badge/Go-1.21+-00ADD8.svg)](https://golang.org/)
 
